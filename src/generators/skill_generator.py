@@ -14,6 +14,8 @@ from src.models import (
     Opinion,
     StyleProfile,
     SkillConfig,
+    DecisionModel,
+    KnowledgeGraphData,
 )
 from src.generators.soul_generator import SoulGenerator
 
@@ -33,14 +35,19 @@ SKILL_MD_TEMPLATE = """# Digital Person: {name}
 
 请先阅读以下文件了解 {name} 的思维方式：
 - `profile/soul.md` — 人格、说话风格、价值观
+- `profile/cognitive.md` — 认知模型、关注领域
+- `profile/decisions.md` — 决策框架、判断模式
 - `knowledge/opinions.json` — 结构化观点库
+- `knowledge/knowledge_graph.json` — 知识图谱（实体与关系）
 
 ## 回答问题的流程
 
 1. 从 opinions.json 中检索与问题相关的观点
-2. 用 soul.md 中的风格组织语言
-3. 如果找到相关观点，引用并标注来源
-4. 如果没有直接观点，基于他的分析框架推理，并标注"推断"
+2. 参考 decisions.md 中的决策框架进行判断
+3. 查阅 knowledge_graph.json 了解实体关系背景
+4. 用 soul.md 中的风格组织语言
+5. 如果找到相关观点，引用并标注来源
+6. 如果没有直接观点，基于他的分析框架推理，并标注"推断"
 
 ## 风格约束
 
@@ -73,6 +80,9 @@ class SkillGenerator:
         opinions: list[Opinion],
         style: StyleProfile,
         output_dir: str,
+        decision_model: DecisionModel | None = None,
+        kg_data: KnowledgeGraphData | None = None,
+        kg_triplets: list[dict] | None = None,
     ) -> Path:
         """生成完整的 Skill 包"""
         base = Path(output_dir) / f"digital-person-{name}"
@@ -118,6 +128,26 @@ class SkillGenerator:
             encoding="utf-8",
         )
 
+        # ── 生成 decisions.md（决策框架）──
+        if decision_model:
+            decisions_md = self._generate_decisions(name, decision_model)
+            (profile_dir / "decisions.md").write_text(decisions_md, encoding="utf-8")
+
+        # ── 生成 knowledge_graph.json ──
+        if kg_data:
+            kg_json = kg_data.model_dump()
+            (knowledge_dir / "knowledge_graph.json").write_text(
+                json.dumps(kg_json, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        # ── 生成 triplets.json ──
+        if kg_triplets:
+            (knowledge_dir / "triplets.json").write_text(
+                json.dumps(kg_triplets, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
         # ── 生成 config.yaml ──
         config = SkillConfig(
             person_name=name,
@@ -139,6 +169,32 @@ class SkillGenerator:
         (base / "SKILL.md").write_text(skill_md, encoding="utf-8")
 
         return base
+
+    def _generate_decisions(self, name: str, decision_model: DecisionModel) -> str:
+        """生成决策框架文件"""
+        lines = [f"# {name} 的决策框架", ""]
+
+        if decision_model.patterns:
+            lines.append("## 通用决策模式")
+            for p in decision_model.patterns:
+                lines.append(f"- {p}")
+            lines.append("")
+
+        if decision_model.checklists:
+            lines.append("## 决策清单")
+            for cl in decision_model.checklists:
+                lines.append(f"### {cl.scenario}")
+                for q in cl.questions:
+                    lines.append(f"- [ ] {q}")
+                if cl.typical_outcome:
+                    lines.append(f"\n**典型倾向**：{cl.typical_outcome}")
+                if cl.past_decisions:
+                    lines.append("\n**历史决策**：")
+                    for d in cl.past_decisions:
+                        lines.append(f"  - {d.get('case', '')} → {d.get('result', '')}（{d.get('reasoning', '')}）")
+                lines.append("")
+
+        return "\n".join(lines)
 
     def _generate_cognitive(
         self, opinions: list[Opinion], topics_list: list[ContentTopics]
