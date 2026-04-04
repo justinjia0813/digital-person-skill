@@ -78,29 +78,43 @@ class WeChatMPAdapter(BaseAdapter):
 
     def _parse_html(self, html: str, url: str = "") -> ContentItem:
         """解析 HTML 页面，提取正文"""
-        doc = Document(html)
-        title = doc.title()
-
-        # 用 readability 提取正文 HTML
-        summary_html = doc.summary()
-
-        # 转为 Markdown
-        content_md = self.h2t.handle(summary_html)
-
-        # 清理多余空白
-        content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
-
-        # 尝试提取作者和发布时间（公众号页面结构）
-        author = ""
-        publish_time = None
         soup = BeautifulSoup(html, "html.parser")
 
-        # 公众号文章通常在 id="js_name" 的元素中存作者
+        # ── 标题提取（优先公众号专用选择器）──
+        title = ""
+        # 1) 公众号文章标准标题容器
+        title_el = soup.find(id="activity-name")
+        if title_el:
+            title = title_el.get_text(strip=True)
+        # 2) 回退到 <title> 标签
+        if not title:
+            title_tag = soup.find("title")
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+                # 清理公众号常见的后缀
+                title = re.sub(r"\s*[-–—]\s*.*$", "", title).strip()
+        # 3) 最后用 readability
+        if not title:
+            doc = Document(html)
+            title = doc.title()
+        # 去除可能的 "no-title" 标记
+        if not title or title.lower() in ("no-title", "[no-title]"):
+            title = ""
+
+        # ── 正文提取 ──
+        doc = Document(html)
+        summary_html = doc.summary()
+        content_md = self.h2t.handle(summary_html)
+        content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
+
+        # ── 作者 ──
+        author = ""
         name_el = soup.find(id="js_name")
         if name_el:
             author = name_el.get_text(strip=True)
 
-        # 发布时间
+        # ── 发布时间 ──
+        publish_time = None
         time_el = soup.find(id="publish_time")
         if time_el:
             publish_time = time_el.get_text(strip=True)
@@ -109,7 +123,7 @@ class WeChatMPAdapter(BaseAdapter):
             id=f"wx_{uuid.uuid4().hex[:8]}",
             source="wechat_mp",
             author=author,
-            title=title,
+            title=title or "(无标题)",
             content=content_md,
             content_type=ContentType.ARTICLE,
             publish_time=publish_time,

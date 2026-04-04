@@ -107,11 +107,56 @@ class SkillConfig(BaseModel):
     data_sources: list[dict] = Field(default_factory=list)
     data_quality_score: float = 0.0
 
-    # RAG 配置（Phase 2 使用）
-    embedding_model: str = "text-embedding-3-small"
+    # RAG 配置
+    embedding_model: str = "embedding-3"
     similarity_threshold: float = 0.75
     max_chunks: int = 5
+    chunk_size: int = 500
+    chunk_overlap: int = 50
 
     # 生成配置
     temperature: float = 0.7
     max_tokens: int = 2000
+
+
+# ── Phase 2: 决策模型 ──
+
+
+class DecisionChecklist(BaseModel):
+    """决策清单"""
+
+    scenario: str
+    questions: list[str]
+    typical_outcome: str
+    past_decisions: list[dict] = Field(default_factory=list)
+
+
+class DecisionModel(BaseModel):
+    """决策模型"""
+
+    checklists: list[DecisionChecklist] = Field(default_factory=list)
+    patterns: list[str] = Field(default_factory=list)
+
+
+# ── Phase 2: 知识图谱 ──
+
+
+class KnowledgeNode(BaseModel):
+    id: str
+    label: str
+    type: str = "concept"  # domain | concept | person | org
+    depth: str = "professional"  # expert | professional | learning
+    since: str = ""
+
+
+class KnowledgeEdge(BaseModel):
+    source: str
+    target: str
+    relation: str
+
+
+class KnowledgeGraphData(BaseModel):
+    """知识图谱"""
+
+    nodes: list[KnowledgeNode] = Field(default_factory=list)
+    edges: list[KnowledgeEdge] = Field(default_factory=list)
