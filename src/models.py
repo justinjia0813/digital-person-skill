@@ -31,6 +31,7 @@ class ContentItem(BaseModel):
     publish_time: Optional[str] = None
     url: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
+    privacy_level: PrivacyLevel | None = None
 
 
 # ── 处理层模型 ──
@@ -71,6 +72,7 @@ class Opinion(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
     confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
     domain: str = ""
+    topic: str = ""  # 更具体的话题（domain 下的细分）
     sentiment: str = ""
     time_context: str = ""
 
@@ -160,3 +162,50 @@ class KnowledgeGraphData(BaseModel):
 
     nodes: list[KnowledgeNode] = Field(default_factory=list)
     edges: list[KnowledgeEdge] = Field(default_factory=list)
+
+
+# ── Phase 3: 观点演化 ──
+
+
+class StanceSnapshot(BaseModel):
+    """某个时间点的立场快照"""
+
+    time: str
+    stance: str
+    source_title: str
+    source_id: str
+    confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
+    claim_type: ClaimType = ClaimType.JUDGMENT
+
+
+class OpinionEvolution(BaseModel):
+    """观点演化追踪"""
+
+    topic: str
+    timeline: list[StanceSnapshot] = Field(default_factory=list)
+    trend: str = ""
+    triggers: list[str] = Field(default_factory=list)
+    stance_changed: bool = False
+
+
+# ── Phase 3: 版本控制 ──
+
+
+class VersionInfo(BaseModel):
+    """Skill 包版本信息"""
+
+    version: str = "1.0.0"
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    article_count: int = 0
+    opinion_count: int = 0
+    sources: list[dict] = Field(default_factory=list)
+    changes: list[str] = Field(default_factory=list)
+
+
+# ── Phase 3: 隐私分级 ──
+
+
+class PrivacyLevel(str, Enum):
+    PUBLIC = "L1"
+    SEMI_PUBLIC = "L2"
+    PRIVATE = "L3"

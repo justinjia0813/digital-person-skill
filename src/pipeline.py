@@ -1,4 +1,4 @@
-"""流水线编排 — 串联整个处理流程（Phase 2）"""
+"""流水线编排 — 串联整个处理流程（Phase 3）"""
 
 from __future__ import annotations
 
@@ -20,8 +20,13 @@ from src.processors.opinion_extractor import OpinionExtractor
 from src.processors.style_analyzer import StyleAnalyzer
 from src.processors.decision_extractor import DecisionExtractor
 from src.processors.knowledge_graph import KnowledgeGraphBuilder
+from src.processors.opinion_evolution import OpinionEvolutionTracker
+from src.processors.cognitive_profiler import CognitiveProfiler
+from src.processors.privacy_manager import PrivacyManager
 from src.generators.skill_generator import SkillGenerator
 from src.generators.vector_indexer import VectorIndexer
+from src.generators.version_manager import VersionManager
+from src.generators.exporters import get_exporter
 
 
 def run_pipeline(
@@ -34,6 +39,7 @@ def run_pipeline(
     provider: str | None = None,
     output_dir: str | None = None,
     skip_vector: bool = False,
+    export_format: str | None = None,
 ) -> Path:
     """运行完整流水线，返回生成的 Skill 包路径"""
 
@@ -42,7 +48,7 @@ def run_pipeline(
     output_dir = output_dir or settings.output_dir
 
     # ── 1. 创建 LLM 客户端 ──
-    print(f"[1/6] 初始化 LLM 客户端 ({provider})...")
+    print(f"[1/9] 初始化 LLM 客户端 ({provider})...")
     llm_kwargs = {}
     if provider == "openai":
         llm_kwargs = {
@@ -59,7 +65,7 @@ def run_pipeline(
     llm = create_llm(provider, **llm_kwargs)
 
     # ── 2. 采集内容 ──
-    print("[2/6] 采集内容...")
+    print("[2/9] 采集内容...")
     items: list[ContentItem] = []
 
     # 选择适配器
@@ -88,7 +94,6 @@ def run_pipeline(
     if input_file:
         fmt = input_format
         if fmt == "auto":
-            # 根据文件扩展名和 source 推断格式
             ext = Path(input_file).suffix.lower()
             if ext == ".csv":
                 fmt = "csv"
@@ -135,18 +140,25 @@ def run_pipeline(
 
     print(f"  共 {len(items)} 篇文章/帖子")
 
-    # ── 3. 处理内容 ──
-    print("[3/6] 处理内容...")
+    # ── 3. 隐私分级 ──
+    print("[3/9] 隐私分级...")
+    privacy_mgr = PrivacyManager()
+    items = privacy_mgr.classify_items(items)
+    l1_count = sum(1 for i in items if i.privacy_level and i.privacy_level.value == "L1")
+    print(f"  ✓ L1(公开): {l1_count}, L2/L3: {len(items) - l1_count}")
+
+    # ── 4. 处理内容 ──
+    print("[4/9] 处理内容...")
     parser = ContentParser()
     topic_ext = TopicExtractor(llm)
     opinion_ext = OpinionExtractor(llm)
     style_analyzer = StyleAnalyzer(llm)
 
-    # 3a. 清洗
+    # 4a. 清洗
     for i, item in enumerate(items):
         items[i] = parser.parse(item)
 
-    # 3b. 主题提取
+    # 4b. 主题提取
     print("  提取主题...")
     all_topics = []
     for item in items:
@@ -156,7 +168,7 @@ def run_pipeline(
         except Exception as e:
             print(f"  [WARN] 主题提取失败 ({item.title[:20]}): {e}")
 
-    # 3c. 观点提取
+    # 4c. 观点提取
     print("  提取观点...")
     all_opinions = []
     for item in items:
@@ -170,7 +182,7 @@ def run_pipeline(
 
     print(f"  共提取 {len(all_opinions)} 个观点")
 
-    # 3d. 风格分析
+    # 4d. 风格分析
     print("  分析写作风格...")
     try:
         style = style_analyzer.analyze(items)
@@ -179,10 +191,9 @@ def run_pipeline(
         from src.models import StyleProfile
         style = StyleProfile()
 
-    # ── 4. Phase 2 新增：决策框架 + 知识图谱 ──
-    print("[4/6] 提取决策框架和知识图谱...")
+    # ── 5. 决策框架 + 知识图谱 ──
+    print("[5/9] 提取决策框架和知识图谱...")
 
-    # 4a. 决策框架
     decision_model = None
     try:
         decision_ext = DecisionExtractor(llm)
@@ -191,7 +202,6 @@ def run_pipeline(
     except Exception as e:
         print(f"  [WARN] 决策提取失败: {e}")
 
-    # 4b. 知识图谱
     kg_data = None
     kg_triplets = []
     try:
@@ -202,8 +212,29 @@ def run_pipeline(
     except Exception as e:
         print(f"  [WARN] 知识图谱生成失败: {e}")
 
-    # ── 5. 生成 Skill 包 ──
-    print("[5/6] 生成 Skill 包...")
+    # ── 6. 观点演化追踪 ──
+    print("[6/9] 观点演化追踪...")
+    evolutions = []
+    try:
+        evolution_tracker = OpinionEvolutionTracker(llm)
+        evolutions = evolution_tracker.build_evolution(all_opinions, items)
+        changed = sum(1 for e in evolutions if e.stance_changed)
+        print(f"  ✓ 追踪 {len(evolutions)} 个领域, {changed} 个领域立场有变化")
+    except Exception as e:
+        print(f"  [WARN] 观点演化追踪失败: {e}")
+
+    # ── 7. 认知建模（LLM 增强） ──
+    print("[7/9] 认知建模...")
+    cognitive_data = None
+    try:
+        profiler = CognitiveProfiler(llm)
+        cognitive_data = profiler.profile(all_opinions, style, all_topics, items)
+        print(f"  ✓ 认知模型生成完成")
+    except Exception as e:
+        print(f"  [WARN] 认知建模失败: {e}")
+
+    # ── 8. 生成 Skill 包 ──
+    print("[8/9] 生成 Skill 包...")
     generator = SkillGenerator()
     skill_path = generator.generate(
         name=name,
@@ -211,15 +242,51 @@ def run_pipeline(
         topics_list=all_topics,
         opinions=all_opinions,
         style=style,
+        output_dir=output_dir,
         decision_model=decision_model,
         kg_data=kg_data,
         kg_triplets=kg_triplets,
-        output_dir=output_dir,
+        evolutions=evolutions,
+        cognitive_data=cognitive_data,
     )
 
-    # ── 6. 向量索引 ──
+    # ── 版本管理 ──
+    try:
+        ver_mgr = VersionManager(output_dir)
+        old_version = ver_mgr.detect_current_version(skill_path)
+        new_version_str = ver_mgr.increment_version(
+            old_version.version if old_version else None
+        )
+
+        # 生成 CHANGELOG
+        from src.models import VersionInfo
+        new_version = VersionInfo(
+            version=new_version_str,
+            article_count=len(items),
+            opinion_count=len(all_opinions),
+            sources=generator._summarize_sources(items),
+        )
+        changelog = ver_mgr.generate_changelog(skill_path, old_version, new_version)
+        (skill_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+
+        # 版本归档
+        ver_mgr.create_versioned_copy(skill_path, new_version_str)
+        print(f"  ✓ 版本 v{new_version_str}")
+    except Exception as e:
+        print(f"  [WARN] 版本管理失败: {e}")
+
+    # ── 多格式导出 ──
+    if export_format:
+        try:
+            exporter = get_exporter(export_format)
+            export_path = exporter.export(skill_path, name)
+            print(f"  ✓ 导出 {export_format} 格式: {export_path.name}")
+        except Exception as e:
+            print(f"  [WARN] 导出失败: {e}")
+
+    # ── 9. 向量索引 ──
     if not skip_vector:
-        print("[6/6] 构建向量索引...")
+        print("[9/9] 构建向量索引...")
         try:
             indexer = VectorIndexer(
                 api_key=settings.openai_api_key,
@@ -234,7 +301,7 @@ def run_pipeline(
             print(f"  [WARN] 向量索引构建失败: {e}")
             print(f"  提示：可跳过此步骤（--skip-vector），稍后手动构建")
     else:
-        print("[6/6] 跳过向量索引（--skip-vector）")
+        print("[9/9] 跳过向量索引（--skip-vector）")
 
     # ── 完成 ──
     print(f"\n完成！Skill 包已生成到：{skill_path}")
@@ -246,7 +313,10 @@ def run_pipeline(
     print(f"  - knowledge/articles.json    {len(items)} 篇文章索引")
     print(f"  - knowledge/knowledge_graph.json  知识图谱")
     print(f"  - knowledge/triplets.json     知识三元组")
-    print(f"  - knowledge/vector_db/        向量索引")
+    print(f"  - memory/evolution.json       观点演化追踪")
+    print(f"  - CHANGELOG.md           版本变更日志")
+    if export_format:
+        print(f"  - 导出格式: {export_format}")
     print(f"  - config.yaml           配置文件")
 
     return skill_path
@@ -278,6 +348,11 @@ def main():
     )
     parser.add_argument("--output", help="输出目录（默认 ./output）")
     parser.add_argument("--skip-vector", action="store_true", help="跳过向量索引构建")
+    parser.add_argument(
+        "--export",
+        choices=["claude", "chatgpt"],
+        help="导出为指定平台的自定义指令格式",
+    )
 
     args = parser.parse_args()
 
@@ -295,6 +370,7 @@ def main():
         provider=args.provider,
         output_dir=args.output,
         skip_vector=args.skip_vector,
+        export_format=args.export,
     )
 
 

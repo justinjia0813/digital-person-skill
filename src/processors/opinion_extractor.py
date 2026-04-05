@@ -19,7 +19,8 @@ OPINION_EXTRACTION_PROMPT = """你是一个专业的内容分析师。请从以�
 4. evidence_refs: 引用的数据、报告、案例等证据（列表）
 5. confidence: 作者对该观点的信心 — high/medium/low
 6. domain: 观点所属领域（如"AI投资"、"半导体"、"商业模式"等）
-7. sentiment: 情感倾向（如 cautiously_optimistic、bearish、assertive、reflective 等）
+7. topic: 该观点的具体话题（domain 下的细分，如 domain="AI投资" 则 topic="大模型商业化"）
+8. sentiment: 情感倾向（如 cautiously_optimistic、bearish、assertive、reflective 等）
 
 请以 JSON 格式输出：
 {{
@@ -31,6 +32,7 @@ OPINION_EXTRACTION_PROMPT = """你是一个专业的内容分析师。请从以�
       "evidence_refs": ["证据1"],
       "confidence": "high",
       "domain": "AI投资",
+      "topic": "大模型商业化",
       "sentiment": "cautiously_optimistic"
     }}
   ]
@@ -79,6 +81,7 @@ class OpinionExtractor:
                     evidence_refs=op_data.get("evidence_refs", []),
                     confidence=confidence,
                     domain=op_data.get("domain", ""),
+                    topic=op_data.get("topic", ""),
                     sentiment=op_data.get("sentiment", ""),
                     time_context=item.publish_time or "",
                 )

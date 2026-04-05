@@ -12,6 +12,7 @@ from src.models import (
     ContentItem,
     ContentTopics,
     Opinion,
+    OpinionEvolution,
     StyleProfile,
     SkillConfig,
     DecisionModel,
@@ -83,6 +84,8 @@ class SkillGenerator:
         decision_model: DecisionModel | None = None,
         kg_data: KnowledgeGraphData | None = None,
         kg_triplets: list[dict] | None = None,
+        evolutions: list[OpinionEvolution] | None = None,
+        cognitive_data: dict | None = None,
     ) -> Path:
         """生成完整的 Skill 包"""
         base = Path(output_dir) / f"digital-person-{name}"
@@ -96,12 +99,19 @@ class SkillGenerator:
         knowledge_dir = base / "knowledge"
         knowledge_dir.mkdir(exist_ok=True)
 
+        # memory/（Phase 3 新增）
+        memory_dir = base / "memory"
+        memory_dir.mkdir(exist_ok=True)
+
         # ── 生成 soul.md ──
         soul_content = self.soul_generator.generate(name, style, opinions)
         (profile_dir / "soul.md").write_text(soul_content, encoding="utf-8")
 
-        # ── 生成 cognitive.md（MVP 简化版）──
-        cognitive = self._generate_cognitive(opinions, topics_list)
+        # ── 生成 cognitive.md ──
+        if cognitive_data:
+            cognitive = self._generate_cognitive_llm(name, cognitive_data)
+        else:
+            cognitive = self._generate_cognitive(opinions, topics_list)
         (profile_dir / "cognitive.md").write_text(cognitive, encoding="utf-8")
 
         # ── 生成 opinions.json ──
@@ -145,6 +155,33 @@ class SkillGenerator:
         if kg_triplets:
             (knowledge_dir / "triplets.json").write_text(
                 json.dumps(kg_triplets, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        # ── Phase 3: 观点演化追踪 ──
+        if evolutions:
+            evo_data = [evo.model_dump() for evo in evolutions]
+            (memory_dir / "evolution.json").write_text(
+                json.dumps(evo_data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        # ── Phase 3: 决策日志 ──
+        if decision_model:
+            decisions_log = {
+                "patterns": decision_model.patterns,
+                "checklists": [
+                    {
+                        "scenario": cl.scenario,
+                        "questions": cl.questions,
+                        "typical_outcome": cl.typical_outcome,
+                        "past_decisions": cl.past_decisions,
+                    }
+                    for cl in decision_model.checklists
+                ],
+            }
+            (memory_dir / "decisions_log.json").write_text(
+                json.dumps(decisions_log, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
 
@@ -233,6 +270,71 @@ class SkillGenerator:
         lines.append("\n## 高频主题")
         for tag, count in sorted(all_tags.items(), key=lambda x: -x[1])[:10]:
             lines.append(f"- {tag}: 出现{count}次")
+
+        return "\n".join(lines)
+
+    def _generate_cognitive_llm(self, name: str, data: dict) -> str:
+        """基于 LLM 分析生成认知模型文件"""
+        lines = [f"# {name} 的认知模型", ""]
+
+        # 思维风格
+        thinking = data.get("thinking_style", {})
+        if thinking:
+            lines.append("## 思维风格")
+            for key, label in [("primary", "主导"), ("secondary", "辅助"), ("tertiary", "第三")]:
+                val = thinking.get(key, "")
+                if val:
+                    lines.append(f"- {label}：{val}")
+            lines.append("")
+
+        # 常用分析框架
+        frameworks = data.get("common_frameworks", [])
+        if frameworks:
+            lines.append("## 常用分析框架")
+            for fw in frameworks[:8]:
+                name_fw = fw.get("name", "")
+                freq = fw.get("frequency", "")
+                fw_domains = fw.get("domains", [])
+                line = f"- {name_fw}"
+                if freq:
+                    line += f" (使用频率: {freq})"
+                if fw_domains:
+                    line += f" — 应用于: {', '.join(fw_domains[:3])}"
+                lines.append(line)
+            lines.append("")
+
+        # 信息偏好
+        info_pref = data.get("information_preference", {})
+        if info_pref:
+            lines.append("## 信息偏好")
+            trusts = info_pref.get("trusts", [])
+            if trusts:
+                lines.append(f"- 信任：{', '.join(trusts[:5])}")
+            skeptical = info_pref.get("skeptical_of", [])
+            if skeptical:
+                lines.append(f"- 怀疑：{', '.join(skeptical[:5])}")
+            speed = info_pref.get("decision_speed", "")
+            if speed:
+                lines.append(f"- 决策速度：{speed}")
+            threshold = info_pref.get("data_threshold", "")
+            if threshold:
+                lines.append(f"- 数据门槛：{threshold}")
+            lines.append("")
+
+        # 认知特征
+        traits = data.get("cognitive_traits", [])
+        if traits:
+            lines.append("## 认知特征")
+            for trait in traits[:10]:
+                t_name = trait.get("trait", "")
+                strength = trait.get("strength", 0)
+                evidence = trait.get("evidence", "")
+                bar = "█" * int(strength * 5) + "░" * (5 - int(strength * 5))
+                line = f"- {t_name} [{bar}] {strength:.1f}"
+                if evidence:
+                    line += f"\n  > {evidence}"
+                lines.append(line)
+            lines.append("")
 
         return "\n".join(lines)
 
