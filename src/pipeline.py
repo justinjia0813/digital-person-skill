@@ -223,7 +223,7 @@ def run_pipeline(
         try:
             indexer = VectorIndexer(
                 api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url.rstrip("/") + "/v1",
+                base_url=settings.openai_base_url.rstrip("/"),
                 embedding_model=settings.embedding_model,
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,

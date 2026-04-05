@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     anthropic_base_url: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
 
+    # 向量索引配置
+    embedding_model: str = "embedding-3"
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
     # 输出配置
     output_dir: str = str(Path(__file__).parent.parent / "output")
 
