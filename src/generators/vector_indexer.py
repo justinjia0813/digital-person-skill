@@ -17,7 +17,8 @@ class VectorIndexer:
     """使用 ChromaDB + OpenAI 兼容 embedding API 构建向量索引"""
 
     INDEX_SCHEMA_VERSION = "digital_person_vector_index/v1"
-    MANIFEST_CORE_FIELDS = frozenset(VectorIndexManifest.CORE_FIELD_NAMES)
+    COLLECTION_METADATA_FIELDS = frozenset(VectorIndexManifest.COLLECTION_FIELD_NAMES)
+    MANIFEST_FIELDS = frozenset(VectorIndexManifest.FIELD_NAMES)
 
     def __init__(
         self,
@@ -67,7 +68,7 @@ class VectorIndexer:
         )
         collection_metadata = {
             "hnsw:space": "cosine",
-            **manifest_core.model_dump(include=self.MANIFEST_CORE_FIELDS),
+            **manifest_core.model_dump(include=self.COLLECTION_METADATA_FIELDS),
         }
 
         # 初始化 ChromaDB（纯本地模式）
@@ -137,20 +138,21 @@ class VectorIndexer:
 
         # ── 4. 保存元数据 ──
         metadata = {
-            **manifest_core.model_dump(include=self.MANIFEST_CORE_FIELDS),
+            **manifest_core.model_dump(include=self.COLLECTION_METADATA_FIELDS),
             "total_documents": len(doc_ids),
             "article_chunks": sum(1 for m in doc_metadatas if m["type"] == "article_chunk"),
             "opinions": sum(1 for m in doc_metadatas if m["type"] == "opinion"),
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
         }
+        manifest = VectorIndexManifest(**metadata)
+        manifest_payload = manifest.model_dump(include=self.MANIFEST_FIELDS)
         (vector_db_path / "metadata.json").write_text(
-            json.dumps(metadata, ensure_ascii=False, indent=2),
+            json.dumps(manifest_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        manifest = VectorIndexManifest(**metadata)
         (vector_root / "manifest.json").write_text(
-            manifest.model_dump_json(indent=2),
+            json.dumps(manifest_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -225,7 +227,14 @@ class VectorIndexer:
             chunk_overlap=chunk_overlap,
         )
         manifest_path = vector_root / "manifest.json"
-        manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(
+                manifest.model_dump(include=cls.MANIFEST_FIELDS),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         return manifest_path
 
     @staticmethod

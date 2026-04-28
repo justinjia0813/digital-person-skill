@@ -210,7 +210,7 @@ class VersionInfo(BaseModel):
 class VectorIndexManifest(BaseModel):
     """向量索引构建清单。"""
 
-    CORE_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+    COLLECTION_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
         "enabled",
         "skip_reason",
         "person_name",
@@ -226,6 +226,15 @@ class VectorIndexManifest(BaseModel):
         "source_fingerprint",
         "built_at",
     )
+    FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        *COLLECTION_FIELD_NAMES,
+        "total_documents",
+        "article_chunks",
+        "opinions",
+        "chunk_size",
+        "chunk_overlap",
+    )
+    CORE_FIELD_NAMES: ClassVar[tuple[str, ...]] = COLLECTION_FIELD_NAMES
 
     enabled: bool = True
     skip_reason: str | None = None
