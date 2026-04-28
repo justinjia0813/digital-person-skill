@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import ClassVar
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -208,6 +209,23 @@ class VersionInfo(BaseModel):
 
 class VectorIndexManifest(BaseModel):
     """向量索引构建清单。"""
+
+    CORE_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "enabled",
+        "skip_reason",
+        "person_name",
+        "skill_name",
+        "skill_version",
+        "index_schema_version",
+        "chat_provider",
+        "chat_model",
+        "embedding_provider",
+        "embedding_model",
+        "collection_name",
+        "index_dir",
+        "source_fingerprint",
+        "built_at",
+    )
 
     enabled: bool = True
     skip_reason: str | None = None

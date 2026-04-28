@@ -17,6 +17,7 @@ class VectorIndexer:
     """使用 ChromaDB + OpenAI 兼容 embedding API 构建向量索引"""
 
     INDEX_SCHEMA_VERSION = "digital_person_vector_index/v1"
+    MANIFEST_CORE_FIELDS = frozenset(VectorIndexManifest.CORE_FIELD_NAMES)
 
     def __init__(
         self,
@@ -48,8 +49,7 @@ class VectorIndexer:
         chroma_path.mkdir(parents=True, exist_ok=True)
         built_at = datetime.now().isoformat()
         source_fingerprint = self._source_fingerprint(items, opinions)
-        collection_metadata = {
-            "hnsw:space": "cosine",
+        manifest_core = VectorIndexManifest(
             **self._manifest_payload(
                 enabled=True,
                 skip_reason=None,
@@ -63,7 +63,11 @@ class VectorIndexer:
                 index_dir=str(vector_db_path.relative_to(Path(output_dir))),
                 source_fingerprint=source_fingerprint,
                 built_at=built_at,
-            ),
+            )
+        )
+        collection_metadata = {
+            "hnsw:space": "cosine",
+            **manifest_core.model_dump(include=self.MANIFEST_CORE_FIELDS),
         }
 
         # 初始化 ChromaDB（纯本地模式）
@@ -133,20 +137,7 @@ class VectorIndexer:
 
         # ── 4. 保存元数据 ──
         metadata = {
-            **self._manifest_payload(
-                enabled=True,
-                skip_reason=None,
-                person_name=person_name,
-                skill_name=skill_name,
-                skill_version=skill_version,
-                runtime_settings=runtime_settings,
-                embedding_provider=self.embedder.provider,
-                embedding_model=self.embedder.model,
-                collection_name=collection_name,
-                index_dir=str(vector_db_path.relative_to(Path(output_dir))),
-                source_fingerprint=source_fingerprint,
-                built_at=built_at,
-            ),
+            **manifest_core.model_dump(include=self.MANIFEST_CORE_FIELDS),
             "total_documents": len(doc_ids),
             "article_chunks": sum(1 for m in doc_metadatas if m["type"] == "article_chunk"),
             "opinions": sum(1 for m in doc_metadatas if m["type"] == "opinion"),
