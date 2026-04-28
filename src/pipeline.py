@@ -33,6 +33,32 @@ class PipelineStageError(RuntimeError):
     """关键阶段失败时抛出，供 CLI 返回非零退出码。"""
 
 
+def validate_provider_config(provider: str, settings) -> None:
+    """在真正创建客户端前校验 provider 配置，避免延迟到网络调用阶段才报错。"""
+
+    if provider == "openai":
+        if not settings.openai_api_key:
+            raise PipelineStageError(
+                "provider=openai 但未配置 OPENAI_API_KEY。"
+                "可在 .env 中设置，或改用 --provider claude。"
+            )
+        if not settings.openai_model:
+            raise PipelineStageError("provider=openai 但未配置 OPENAI_MODEL。")
+        return
+
+    if provider == "claude":
+        if not settings.anthropic_api_key:
+            raise PipelineStageError(
+                "provider=claude 但未配置 ANTHROPIC_API_KEY。"
+                "可在 .env 中设置，或改用 --provider openai。"
+            )
+        if not settings.anthropic_model:
+            raise PipelineStageError("provider=claude 但未配置 ANTHROPIC_MODEL。")
+        return
+
+    raise PipelineStageError(f"不支持的 provider: {provider}")
+
+
 def run_pipeline(
     name: str,
     urls: list[str] | None = None,
@@ -53,6 +79,7 @@ def run_pipeline(
 
     # ── 1. 创建 LLM 客户端 ──
     print(f"[1/9] 初始化 LLM 客户端 ({provider})...")
+    validate_provider_config(provider, settings)
     llm_kwargs = {}
     if provider == "openai":
         llm_kwargs = {

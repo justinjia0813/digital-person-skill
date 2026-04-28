@@ -138,6 +138,39 @@ python -m src.pipeline \
 
 常用环境变量见 [references/setup.md](references/setup.md) 和 [.env.example](.env.example)。
 
+## 集成测试
+
+仓库现在区分两类流水线测试：
+
+- 回归测试：使用 fake LLM / fake 处理器，验证关键编排和文件生成逻辑
+- 真实 provider 集成测试：使用固定真实样本文件，走 `python -m src.pipeline` 的 CLI 主路径
+
+真实 provider 集成测试说明见 [tests/integration/README.md](tests/integration/README.md)。
+
+先跑默认安全测试：
+
+```bash
+pytest tests/test_pipeline_regressions.py tests/test_pipeline_integration_real_provider.py -k "missing or regressions" -vv
+```
+
+如果要在受控环境下验证真实 provider：
+
+```bash
+export RUN_REAL_PROVIDER_TESTS=1
+export OPENAI_API_KEY=your_key
+pytest tests/test_pipeline_integration_real_provider.py -k openai -m integration -vv
+```
+
+或：
+
+```bash
+export RUN_REAL_PROVIDER_TESTS=1
+export ANTHROPIC_API_KEY=your_key
+pytest tests/test_pipeline_integration_real_provider.py -k claude -m integration -vv
+```
+
+默认建议带 `--skip-vector`，先验证主生成链路，再单独检查向量索引依赖。
+
 ## Web 与 CLI 的边界
 
 Web 面板入口：

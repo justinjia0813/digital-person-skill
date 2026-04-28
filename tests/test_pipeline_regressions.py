@@ -25,6 +25,7 @@ from src.models import (
     Topic,
 )
 from src.pipeline import PipelineStageError, run_pipeline
+from src.pipeline import validate_provider_config
 
 
 def _make_item() -> ContentItem:
@@ -57,10 +58,10 @@ def _make_opinion() -> Opinion:
 def _install_pipeline_fakes(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -> None:
     settings = SimpleNamespace(
         llm_provider="openai",
-        openai_api_key="",
+        openai_api_key="test-openai-key",
         openai_model="fake-model",
         openai_base_url="https://example.com",
-        anthropic_api_key="",
+        anthropic_api_key="test-anthropic-key",
         anthropic_model="fake-claude",
         anthropic_base_url="https://example.com",
         embedding_model="embedding-3",
@@ -186,6 +187,30 @@ def test_pipeline_raises_on_critical_stage_failure(monkeypatch: pytest.MonkeyPat
             output_dir=str(tmp_path),
             skip_vector=True,
         )
+
+
+def test_validate_provider_config_requires_openai_key() -> None:
+    settings = SimpleNamespace(
+        openai_api_key="",
+        openai_model="gpt-4o",
+        anthropic_api_key="anthropic-key",
+        anthropic_model="claude-sonnet-4-20250514",
+    )
+
+    with pytest.raises(PipelineStageError, match="OPENAI_API_KEY"):
+        validate_provider_config("openai", settings)
+
+
+def test_validate_provider_config_requires_anthropic_key() -> None:
+    settings = SimpleNamespace(
+        openai_api_key="openai-key",
+        openai_model="gpt-4o",
+        anthropic_api_key="",
+        anthropic_model="claude-sonnet-4-20250514",
+    )
+
+    with pytest.raises(PipelineStageError, match="ANTHROPIC_API_KEY"):
+        validate_provider_config("claude", settings)
 
 
 def test_repeated_generation_cleans_stale_files_and_keeps_versions_consistent(
