@@ -30,7 +30,7 @@ from src.models import (
 )
 from src.runtime import RuntimeSettings
 from src.pipeline import PipelineStageError, run_pipeline
-from src.pipeline import resolve_runtime_settings
+from src.pipeline import _classify_pipeline_failure, resolve_runtime_settings
 
 
 def _make_item() -> ContentItem:
@@ -194,6 +194,104 @@ def test_pipeline_raises_on_critical_stage_failure(monkeypatch: pytest.MonkeyPat
             output_dir=str(tmp_path),
             skip_vector=True,
         )
+
+
+def test_classify_pipeline_failure_maps_rate_limit() -> None:
+    class FakeRateLimitError(RuntimeError):
+        pass
+
+    assert _classify_pipeline_failure(FakeRateLimitError("429 Too Many Requests")) == "provider_rate_limited"
+
+
+def test_classify_pipeline_failure_maps_timeout() -> None:
+    class FakeTimeoutError(RuntimeError):
+        pass
+
+    assert _classify_pipeline_failure(FakeTimeoutError("request timed out")) == "provider_timeout"
+
+
+def test_classify_pipeline_failure_maps_missing_dependency() -> None:
+    assert _classify_pipeline_failure(ModuleNotFoundError("No module named 'chromadb'")) == "dependency_missing"
+
+
+def test_pipeline_marks_provider_rate_limit_with_stable_error_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_pipeline_fakes(monkeypatch, tmp_path)
+
+    class FakeRateLimitError(RuntimeError):
+        pass
+
+    class RateLimitedOpinionExtractor:
+        def __init__(self, llm: object):
+            self.llm = llm
+
+        def extract(self, item: ContentItem) -> list[Opinion]:
+            raise FakeRateLimitError("429 Too Many Requests")
+
+    monkeypatch.setattr("src.pipeline.OpinionExtractor", RateLimitedOpinionExtractor)
+
+    with pytest.raises(PipelineStageError, match="provider_rate_limited"):
+        run_pipeline(
+            name="Tester",
+            texts=[{"title": "Test", "content": "hello world", "author": "Tester"}],
+            output_dir=str(tmp_path),
+            skip_vector=True,
+        )
+
+
+def test_pipeline_marks_provider_timeout_with_stable_error_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_pipeline_fakes(monkeypatch, tmp_path)
+
+    class FakeTimeoutError(RuntimeError):
+        pass
+
+    class TimeoutStyleAnalyzer:
+        def __init__(self, llm: object):
+            self.llm = llm
+
+        def analyze(self, items: list[ContentItem]) -> StyleProfile:
+            raise FakeTimeoutError("request timed out after 30s")
+
+    monkeypatch.setattr("src.pipeline.StyleAnalyzer", TimeoutStyleAnalyzer)
+
+    with pytest.raises(PipelineStageError, match="provider_timeout"):
+        run_pipeline(
+            name="Tester",
+            texts=[{"title": "Test", "content": "hello world", "author": "Tester"}],
+            output_dir=str(tmp_path),
+            skip_vector=True,
+        )
+
+
+def test_pipeline_warns_with_dependency_missing_when_vector_index_dependency_is_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _install_pipeline_fakes(monkeypatch, tmp_path)
+
+    class MissingDependencyVectorIndexer:
+        def __init__(self, embedder, chunk_size: int, chunk_overlap: int):
+            self.embedder = embedder
+
+        def build_index(self, person_name, skill_version, runtime_settings, items, opinions, output_dir):
+            raise ModuleNotFoundError("No module named 'chromadb'")
+
+    monkeypatch.setattr("src.pipeline.VectorIndexer", MissingDependencyVectorIndexer)
+
+    skill_path = run_pipeline(
+        name="Tester",
+        texts=[{"title": "Test", "content": "hello world", "author": "Tester"}],
+        output_dir=str(tmp_path),
+        provider="openai",
+        embedding_provider="openai",
+        skip_vector=False,
+    )
+
+    captured = capsys.readouterr()
+    assert skill_path.exists()
+    assert "向量索引构建失败 (dependency_missing)" in captured.out
 
 
 def test_resolve_runtime_settings_requires_openai_key_for_openai_chat() -> None:
