@@ -162,7 +162,7 @@ def _install_pipeline_fakes(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -
         def profile(self, opinions, style, topics, items) -> dict:
             return {"thinking_style": {"primary": "systems"}}
 
-    monkeypatch.setattr("src.pipeline.WeChatMPAdapter", FakeAdapter)
+    monkeypatch.setattr("src.pipeline._load_wechat_adapter_class", lambda: FakeAdapter)
     monkeypatch.setattr("src.pipeline.ContentParser", FakeParser)
     monkeypatch.setattr("src.pipeline.TopicExtractor", FakeTopicExtractor)
     monkeypatch.setattr("src.pipeline.OpinionExtractor", FakeOpinionExtractor)
@@ -228,6 +228,41 @@ def test_resolve_runtime_settings_requires_anthropic_key_for_claude_chat() -> No
 
     with pytest.raises(PipelineStageError, match="ANTHROPIC_API_KEY"):
         resolve_runtime_settings(settings, provider="claude", embedding_provider=None, skip_vector=True)
+
+
+def test_run_pipeline_validates_provider_credentials_before_loading_wechat_adapter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    settings = SimpleNamespace(
+        llm_provider="openai",
+        openai_api_key="",
+        openai_model="gpt-4o",
+        openai_base_url="https://example.com",
+        openai_embedding_model="text-embedding-3-small",
+        anthropic_api_key="anthropic-key",
+        anthropic_model="claude-sonnet-4-20250514",
+        anthropic_base_url="https://example.com",
+        embedding_provider="",
+        embedding_model="embedding-3",
+        chunk_size=40,
+        chunk_overlap=10,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr("src.pipeline.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "src.pipeline._load_wechat_adapter_class",
+        lambda: (_ for _ in ()).throw(AssertionError("wechat adapter should not load before preflight")),
+    )
+
+    with pytest.raises(PipelineStageError, match="OPENAI_API_KEY"):
+        run_pipeline(
+            name="Tester",
+            input_file=str(tmp_path / "placeholder.json"),
+            source="wechat_mp",
+            provider="openai",
+            skip_vector=True,
+            output_dir=str(tmp_path),
+        )
 
 
 def test_resolve_runtime_settings_defaults_claude_chat_to_openai_embedding() -> None:

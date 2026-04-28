@@ -145,6 +145,7 @@ python -m src.pipeline \
 - `--provider claude` 且不传 `--embedding-provider`：chat 走 Claude，但 embedding 会默认推导为 `openai`
 - `--provider claude --embedding-provider openai`：与上一条等价，只是把默认推导显式写出来
 - `--embedding-provider claude`：当前会直接报错，因为 embedding provider 目前仅支持 `openai`
+- provider 前置校验会先于 `wechat_mp`/`readability` 采集依赖加载执行；因此在 `--skip-vector` 且缺少 provider 凭证时，CLI 会优先返回缺少 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` 的提示
 
 `skip_vector=false`（也就是未传 `--skip-vector`）时的前置校验：
 

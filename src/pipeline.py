@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from pathlib import Path
 
 from src.config import get_settings
-from src.adapters.wechat_mp import WeChatMPAdapter
 from src.adapters.weibo import WeiboAdapter
 from src.adapters.twitter import TwitterAdapter
 from src.models import ContentItem
@@ -30,6 +30,13 @@ from src.runtime import ProviderRegistry
 
 class PipelineStageError(RuntimeError):
     """关键阶段失败时抛出，供 CLI 返回非零退出码。"""
+
+
+def _load_wechat_adapter_class():
+    """延迟导入微信适配器，避免 CLI preflight 被可选采集依赖打断。"""
+
+    module = importlib.import_module("src.adapters.wechat_mp")
+    return module.WeChatMPAdapter
 
 
 def resolve_runtime_settings(
@@ -90,11 +97,11 @@ def run_pipeline(
     elif source in ("twitter", "x"):
         adapter = TwitterAdapter()
     else:
-        adapter = WeChatMPAdapter()
+        adapter = _load_wechat_adapter_class()()
 
     # URL 模式（仅微信）
     if urls and source in ("auto", "wechat_mp"):
-        wx_adapter = WeChatMPAdapter()
+        wx_adapter = _load_wechat_adapter_class()()
         for url in urls:
             url = url.strip()
             if not url or url.startswith("#"):
@@ -135,7 +142,7 @@ def run_pipeline(
                 file_items = tw_adapter.fetch_from_json(input_file, author=name)
             items.extend(file_items)
         else:
-            wx_adapter = WeChatMPAdapter()
+            wx_adapter = _load_wechat_adapter_class()()
             file_items = wx_adapter.fetch_from_file(input_file)
             items.extend(file_items)
 
@@ -143,7 +150,7 @@ def run_pipeline(
 
     # 手动粘贴模式
     if texts:
-        wx_adapter = WeChatMPAdapter()
+        wx_adapter = _load_wechat_adapter_class()()
         for t in texts:
             item = wx_adapter.fetch_from_text(
                 title=t["title"], content=t["content"], author=t.get("author", "")
