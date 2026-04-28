@@ -16,13 +16,14 @@ class ClaudeInstructionsExporter:
     def export(self, skill_dir: Path, name: str) -> Path:
         """将 Skill 包导出为 Claude Code 自定义指令"""
         output_path = skill_dir / "CLAUDE.md"
+        manifest_files = self._read_manifest_files(skill_dir)
 
         # 统计数据
         opinions_count = self._count_opinions(skill_dir / "knowledge" / "opinions.json")
         domains_summary = self._get_domains_summary(skill_dir / "knowledge" / "opinions.json")
-        has_decisions = (skill_dir / "profile" / "decisions.md").exists()
-        has_kg = (skill_dir / "knowledge" / "knowledge_graph.json").exists()
-        has_evolution = (skill_dir / "memory" / "evolution.json").exists()
+        has_decisions = self._is_generated(skill_dir, manifest_files, "profile/decisions.md")
+        has_kg = self._is_generated(skill_dir, manifest_files, "knowledge/knowledge_graph.json")
+        has_evolution = self._is_generated(skill_dir, manifest_files, "memory/evolution.json")
 
         # 读取 soul.md 中的说话风格（轻量，适合内联）
         soul = self._read_file(skill_dir / "profile" / "soul.md")
@@ -88,6 +89,21 @@ class ClaudeInstructionsExporter:
 
         output_path.write_text("\n".join(sections), encoding="utf-8")
         return output_path
+
+    def _read_manifest_files(self, skill_dir: Path) -> dict[str, str]:
+        manifest_path = skill_dir / "build_manifest.json"
+        if not manifest_path.exists():
+            return {}
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return manifest.get("files", {})
+
+    def _is_generated(self, skill_dir: Path, manifest_files: dict[str, str], relative_path: str) -> bool:
+        if manifest_files:
+            return manifest_files.get(relative_path) == "generated"
+        return (skill_dir / relative_path).exists()
 
     def _read_file(self, path: Path) -> str:
         if path.exists():

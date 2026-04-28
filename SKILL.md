@@ -1,12 +1,13 @@
 ---
 name: digital-person
 description: |
-  从公开内容（公众号、微博、Twitter/X）中提取观点、决策框架和认知风格，
-  生成 AI 数字分身 Skill 包和 Claude Code 自定义指令（CLAUDE.md）。
+  这是 digital-person 生成器仓库的使用说明，不是最终 persona skill 本体。
+  它从公开内容中提取观点、决策框架和认知风格，生成
+  `output/digital-person-<name>/` 目录，以及可选的 `CLAUDE.md`
+  或 `chatgpt_instructions.md` 导出文件。
 
-  当用户想要：(1) 为某人创建数字分身，(2) 把公众号/社交媒体内容转化为
-  Claude Code 自定义指令，(3) 批量提取文章中的观点和决策框架，
-  (4) 生成可部署的 AI persona skill 时触发此 skill。
+  当用户想要：(1) 为某人创建数字分身，(2) 把公众号/社交媒体内容
+  转成 Claude Code 或 ChatGPT 指令，(3) 批量提取观点和决策框架时触发。
 allowed-tools:
   - Bash
   - Read
@@ -18,90 +19,151 @@ allowed-tools:
 
 # Digital Person Skill — 数字分身生成器
 
-将一个人的公开内容转化为结构化 Skill 包，让 Claude 能"像他一样思考"。
+## 先明确对象
+
+本仓库有两个不同对象：
+
+1. `digital-person`
+   - 当前这个生成器仓库
+   - 用来安装依赖、配置 provider、运行流水线
+2. `digital-person-<name>`
+   - 流水线生成的最终 persona skill
+   - 输出目录固定在 `output/digital-person-<name>/`
+
+不要把这两者混为一谈。
 
 ## 前置条件
 
-项目已安装依赖且配置了 LLM API Key。运行以下命令确认：
-
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-test -f .env && echo "OK" || echo "需要创建 .env"
+cp .env.example .env
+python -m src.pipeline --help
 ```
 
-如未配置，参考 `references/setup.md` 完成。
+如果 `python -m src.pipeline --help` 不能正常打印帮助，先修复环境，不要继续。
 
-## 工作流程
+Provider 和环境变量说明见 [references/setup.md](references/setup.md)。
 
-### 1. 采集内容
+## 四段链路
 
-用户提供数据源后，运行采集脚本：
+### 1. 安装
 
-**URL 模式（微信公众号文章）：**
+目标：把生成器 CLI 跑起来。
+
+关键事实：
+
+- 主执行入口是 `python -m src.pipeline`
+- `.env` 中至少要有 `OPENAI_API_KEY` 或 `ANTHROPIC_API_KEY`
+
+### 2. 运行
+
+URL 模式：
 
 ```bash
 python -m src.pipeline --name "人物名" --urls urls.txt --skip-vector
 ```
 
-**本地文件模式（微博/Twitter 导出）：**
+本地文件模式：
 
 ```bash
 python -m src.pipeline --name "人物名" --input data.json --source weibo --skip-vector
 ```
 
-**手动粘贴模式：** 通过 Web 面板 `python run_web.py` 在浏览器中粘贴。
-
-### 2. 运行完整流水线
+完整导出示例：
 
 ```bash
 python -m src.pipeline \
   --name "人物名" \
   --urls urls.txt \
+  --skip-vector \
   --export claude
 ```
 
 关键参数：
-- `--provider openai|claude` — 选择 LLM 后端
-- `--skip-vector` — 跳过向量索引（节省时间）
-- `--export claude` — 额外生成 CLAUDE.md 自定义指令
-- `--export chatgpt` — 导出 ChatGPT 格式
 
-### 3. 部署生成的 Skill
+- `--provider openai|claude`：选择 LLM 后端；不传时读 `.env`
+- `--skip-vector`：首次运行建议开启，减少环境变量与索引依赖
+- `--export claude`：额外生成 `CLAUDE.md`
+- `--export chatgpt`：额外生成 `chatgpt_instructions.md`
 
-流水线在 `output/digital-person-<name>/` 下生成完整 Skill 包。
+最低输入建议：
 
-**部署到 Claude Code：**
-将生成的 `CLAUDE.md` 内容复制到项目的 `CLAUDE.md` 或 `~/.claude/CLAUDE.md` 中。
+- 至少 5 篇高信息密度内容
+- 主题越集中，生成的人格和判断框架越稳定
 
-**部署为 Claude Code Skill：**
-将整个输出目录复制到 `~/.claude/skills/<skill-name>/`，即可通过 `/digital-person` 调用。
+### 3. 导出
+
+流水线总会生成 `output/digital-person-<name>/`。
+
+只有满足下列条件时才会出现额外平台文件：
+
+- 传 `--export claude`：生成 `CLAUDE.md`
+- 传 `--export chatgpt`：生成 `chatgpt_instructions.md`
+
+因此，`CLAUDE.md` 不是默认产物，只有真实导出时才应提及。
+
+### 4. 部署
+
+部署为 Claude Code 项目/用户指令：
+
+```bash
+cp output/digital-person-人物名/CLAUDE.md ./CLAUDE.md
+```
+
+或：
+
+```bash
+cp output/digital-person-人物名/CLAUDE.md ~/.claude/CLAUDE.md
+```
+
+部署为 persona skill：
+
+```bash
+cp -R output/digital-person-人物名 ~/.claude/skills/
+```
+
+调用和识别应以真实产物名为准，即 `digital-person-人物名`，而不是统一写成 `/digital-person`。
+
+## Web / CLI 边界
+
+Web 面板入口：
+
+```bash
+python run_web.py
+```
+
+边界如下：
+
+- CLI 负责真正执行流水线
+- Web 负责录入、浏览、查看和生成命令
+- Web 当前不会直接执行长时间任务
+
+“手动粘贴模式”的真实含义是：
+
+- 在 Web 中把内容保存到本地数据文件
+- 然后你仍需回到终端，使用 CLI 把这些数据喂给流水线
 
 ## 输出文件说明
 
-| 文件 | 用途 |
+| 文件 | 角色 |
 |------|------|
-| `SKILL.md` | Agent 指令（观点、风格、行为规则） |
-| `CLAUDE.md` | Claude Code 自定义指令（可直接粘贴） |
-| `profile/soul.md` | 人格、说话风格、价值观 |
-| `profile/cognitive.md` | 认知模型（思维风格、分析框架） |
-| `profile/decisions.md` | 决策框架和判断模式 |
+| `SKILL.md` | 生成后的 persona skill 主指令 |
+| `config.yaml` | 版本与数据源元信息 |
+| `CHANGELOG.md` | 版本变更记录 |
+| `profile/soul.md` | 人格、风格、价值观 |
+| `profile/cognitive.md` | 认知模型、分析框架 |
+| `profile/decisions.md` | 决策框架 |
 | `knowledge/opinions.json` | 结构化观点库 |
-| `knowledge/knowledge_graph.json` | 实体关系知识图谱 |
+| `knowledge/articles.json` | 原始内容索引 |
+| `knowledge/knowledge_graph.json` | 知识图谱 |
 | `memory/evolution.json` | 观点演化追踪 |
-| `CHANGELOG.md` | 版本变更日志 |
+| `CLAUDE.md` | 仅在 `--export claude` 时出现 |
+| `chatgpt_instructions.md` | 仅在 `--export chatgpt` 时出现 |
 
-## 增量更新
+## 当前版本边界
 
-再次运行流水线时，系统自动：
-- 检测已有版本，递增版本号
-- 归档旧版本到 `versions/` 目录
-- 追加 CHANGELOG 条目
-- 追踪观点演化（立场是否变化）
-
-## 数据源适配
-
-| 平台 | 采集方式 | `--source` |
-|------|---------|------------|
-| 微信公众号 | URL 爬取或手动粘贴 | `wechat_mp`（默认） |
-| 微博 | CSV/JSON 导出文件 | `weibo` |
-| Twitter/X | tweet.js / CSV / JSON | `twitter` |
+- 已实现：CLI 生成、provider 切换、平台导出、Web 浏览面板
+- 未实现为全自动体验：通过对话直接跑完整流水线、Web 直接执行长任务
+- 文档中应始终把本仓库称为“生成器”，把 `output/digital-person-<name>/` 称为“生成产物”或“persona skill”

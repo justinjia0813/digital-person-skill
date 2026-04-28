@@ -320,22 +320,40 @@ def run_pipeline(
         print("[9/9] 跳过向量索引（--skip-vector）")
 
     # ── 完成 ──
+    manifest = _read_build_manifest(skill_path)
     print(f"\n完成！Skill 包已生成到：{skill_path}")
-    print(f"  - SKILL.md              主指令文件")
-    print(f"  - profile/soul.md       人格描述")
-    print(f"  - profile/cognitive.md  认知模型")
-    print(f"  - profile/decisions.md  决策框架")
-    print(f"  - knowledge/opinions.json    {len(all_opinions)} 个观点")
-    print(f"  - knowledge/articles.json    {len(items)} 篇文章索引")
-    print(f"  - knowledge/knowledge_graph.json  知识图谱")
-    print(f"  - knowledge/triplets.json     知识三元组")
-    print(f"  - memory/evolution.json       观点演化追踪")
-    print(f"  - CHANGELOG.md           版本变更日志")
+    _print_output_status(manifest, "SKILL.md", "主指令文件")
+    _print_output_status(manifest, "profile/soul.md", "人格描述")
+    _print_output_status(manifest, "profile/cognitive.md", "认知模型")
+    _print_output_status(manifest, "profile/decisions.md", "决策框架")
+    _print_output_status(manifest, "knowledge/opinions.json", f"{len(all_opinions)} 个观点")
+    _print_output_status(manifest, "knowledge/articles.json", f"{len(items)} 篇文章索引")
+    _print_output_status(manifest, "knowledge/knowledge_graph.json", "知识图谱")
+    _print_output_status(manifest, "knowledge/triplets.json", "知识三元组")
+    _print_output_status(manifest, "memory/evolution.json", "观点演化追踪")
+    _print_output_status(manifest, "memory/decisions_log.json", "决策日志")
+    print("  - CHANGELOG.md           generated 版本变更日志")
     if export_format:
-        print(f"  - 导出格式: {export_format}")
-    print(f"  - config.yaml           配置文件")
+        print(f"  - 导出格式: {export_format} generated")
+    print("  - config.yaml           generated 配置文件")
 
     return skill_path
+
+
+def _read_build_manifest(skill_path: Path) -> dict[str, str]:
+    manifest_path = skill_path / "build_manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return manifest.get("files", {})
+
+
+def _print_output_status(manifest: dict[str, str], relative_path: str, description: str) -> None:
+    status = manifest.get(relative_path, "unknown")
+    print(f"  - {relative_path:<28} {status} {description}")
 
 
 def main():

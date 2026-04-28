@@ -153,6 +153,7 @@ class SkillGenerator:
         # ── 生成 soul.md ──
         soul_content = self.soul_generator.generate(name, style, opinions)
         (profile_dir / "soul.md").write_text(soul_content, encoding="utf-8")
+        generated_files = {"profile/soul.md": "generated"}
 
         # ── 生成 cognitive.md ──
         if cognitive_data:
@@ -160,6 +161,7 @@ class SkillGenerator:
         else:
             cognitive = self._generate_cognitive(opinions, topics_list)
         (profile_dir / "cognitive.md").write_text(cognitive, encoding="utf-8")
+        generated_files["profile/cognitive.md"] = "generated"
 
         # ── 生成 opinions.json ──
         opinions_data = [op.model_dump() for op in opinions]
@@ -167,6 +169,7 @@ class SkillGenerator:
             json.dumps(opinions_data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        generated_files["knowledge/opinions.json"] = "generated"
 
         # ── 生成 articles.json（文章索引）──
         articles_data = [
@@ -184,11 +187,15 @@ class SkillGenerator:
             json.dumps(articles_data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        generated_files["knowledge/articles.json"] = "generated"
 
         # ── 生成 decisions.md（决策框架）──
         if self._has_decision_content(decision_model):
             decisions_md = self._generate_decisions(name, decision_model)
             (profile_dir / "decisions.md").write_text(decisions_md, encoding="utf-8")
+            generated_files["profile/decisions.md"] = "generated"
+        else:
+            generated_files["profile/decisions.md"] = "skipped"
 
         # ── 生成 knowledge_graph.json ──
         if kg_data:
@@ -197,6 +204,9 @@ class SkillGenerator:
                 json.dumps(kg_json, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            generated_files["knowledge/knowledge_graph.json"] = "generated"
+        else:
+            generated_files["knowledge/knowledge_graph.json"] = "skipped"
 
         # ── 生成 triplets.json ──
         if kg_triplets:
@@ -204,6 +214,9 @@ class SkillGenerator:
                 json.dumps(kg_triplets, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            generated_files["knowledge/triplets.json"] = "generated"
+        else:
+            generated_files["knowledge/triplets.json"] = "skipped"
 
         # ── Phase 3: 观点演化追踪 ──
         if evolutions:
@@ -212,6 +225,9 @@ class SkillGenerator:
                 json.dumps(evo_data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            generated_files["memory/evolution.json"] = "generated"
+        else:
+            generated_files["memory/evolution.json"] = "skipped"
 
         # ── Phase 3: 决策日志 ──
         if self._has_decision_content(decision_model):
@@ -231,6 +247,9 @@ class SkillGenerator:
                 json.dumps(decisions_log, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            generated_files["memory/decisions_log.json"] = "generated"
+        else:
+            generated_files["memory/decisions_log.json"] = "skipped"
 
         # ── 生成 config.yaml ──
         config = SkillConfig(
@@ -242,6 +261,7 @@ class SkillGenerator:
             yaml.dump(config.model_dump(), allow_unicode=True, default_flow_style=False),
             encoding="utf-8",
         )
+        generated_files["config.yaml"] = "generated"
 
         # ── 生成 SKILL.md（主指令文件）──
         skill_md = SKILL_MD_TEMPLATE.format(
@@ -253,6 +273,14 @@ class SkillGenerator:
             source_count=len(items),
         )
         (temp_base / "SKILL.md").write_text(skill_md, encoding="utf-8")
+        generated_files["SKILL.md"] = "generated"
+        self._write_build_manifest(
+            temp_base,
+            generated_files=generated_files,
+            version=version,
+            article_count=len(items),
+            opinion_count=len(opinions),
+        )
 
         backup_base = None
         if base.exists():
@@ -276,6 +304,28 @@ class SkillGenerator:
         return bool(
             decision_model
             and (decision_model.patterns or decision_model.checklists)
+        )
+
+    @staticmethod
+    def _write_build_manifest(
+        skill_dir: Path,
+        generated_files: dict[str, str],
+        version: str,
+        article_count: int,
+        opinion_count: int,
+    ) -> None:
+        manifest = {
+            "version": version,
+            "generated_at": datetime.now().isoformat(),
+            "counts": {
+                "articles": article_count,
+                "opinions": opinion_count,
+            },
+            "files": generated_files,
+        }
+        (skill_dir / "build_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
     def _generate_decisions(self, name: str, decision_model: DecisionModel) -> str:

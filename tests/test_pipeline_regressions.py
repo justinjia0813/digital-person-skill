@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from src.generators.exporters.claude_instructions import ClaudeInstructionsExporter
 from src.models import (
     ClaimType,
     ConfidenceLevel,
@@ -220,6 +221,7 @@ def test_repeated_generation_cleans_stale_files_and_keeps_versions_consistent(
 
     config = yaml.safe_load((second_path / "config.yaml").read_text(encoding="utf-8"))
     changelog = (second_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    manifest = json.loads((second_path / "build_manifest.json").read_text(encoding="utf-8"))
 
     assert second_path == skill_path
     assert not stale_path.exists()
@@ -227,6 +229,7 @@ def test_repeated_generation_cleans_stale_files_and_keeps_versions_consistent(
     assert config["version"] == "1.0.1"
     assert "## v1.0.1" in changelog
     assert (second_path / "versions" / "v1.0.1" / "memory" / "evolution.json").exists()
+    assert manifest["files"]["profile/decisions.md"] == "skipped"
 
 
 def test_chunking_short_tail_terminates() -> None:
@@ -262,3 +265,38 @@ def test_claude_export_is_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert (exported_path / "CLAUDE.md").exists()
     content = (exported_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "profile/soul.md" in content
+
+
+def test_claude_export_uses_manifest_not_stale_files(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "digital-person-Tester"
+    (skill_dir / "profile").mkdir(parents=True)
+    (skill_dir / "knowledge").mkdir()
+    (skill_dir / "memory").mkdir()
+
+    (skill_dir / "profile" / "soul.md").write_text("style", encoding="utf-8")
+    (skill_dir / "knowledge" / "opinions.json").write_text("[]", encoding="utf-8")
+    (skill_dir / "knowledge" / "articles.json").write_text("[]", encoding="utf-8")
+    (skill_dir / "profile" / "decisions.md").write_text("stale decisions", encoding="utf-8")
+    (skill_dir / "knowledge" / "knowledge_graph.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "memory" / "evolution.json").write_text("[]", encoding="utf-8")
+    (skill_dir / "build_manifest.json").write_text(
+        json.dumps(
+            {
+                "files": {
+                    "profile/decisions.md": "skipped",
+                    "knowledge/knowledge_graph.json": "skipped",
+                    "memory/evolution.json": "skipped",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    export_path = ClaudeInstructionsExporter().export(skill_dir, "Tester")
+    content = export_path.read_text(encoding="utf-8")
+
+    assert "profile/decisions.md" not in content
+    assert "knowledge/knowledge_graph.json" not in content
+    assert "memory/evolution.json" not in content
