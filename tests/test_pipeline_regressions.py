@@ -351,14 +351,18 @@ def test_pipeline_uses_explicit_embedding_provider_when_vector_enabled(
             (vector_dir / "metadata.json").write_text(
                 json.dumps(
                     {
+                        "enabled": True,
+                        "skip_reason": None,
                         "person_name": person_name,
+                        "skill_name": f"digital-person-{person_name}",
                         "skill_version": skill_version,
-                        "index_schema": "digital_person_vector_index",
-                        "index_version": "1",
+                        "index_schema_version": "digital_person_vector_index/v1",
                         "chat_provider": runtime_settings.chat_provider,
                         "chat_model": runtime_settings.chat_model,
                         "embedding_provider": runtime_settings.embedding_provider,
                         "embedding_model": runtime_settings.embedding_model,
+                        "collection_name": f"{person_name}-{skill_version}",
+                        "index_dir": f"knowledge/vector_index/{person_name}-{skill_version}",
                         "source_fingerprint": "fake",
                         "built_at": "2026-04-28T00:00:00",
                     }
@@ -391,7 +395,44 @@ def test_pipeline_uses_explicit_embedding_provider_when_vector_enabled(
     build_manifest = json.loads((skill_path / "build_manifest.json").read_text(encoding="utf-8"))
     assert build_manifest["runtime"]["chat_provider"] == "claude"
     assert build_manifest["runtime"]["embedding_provider"] == "openai"
-    assert build_manifest["vector_index"]["mode"] == "enabled"
+    assert build_manifest["vector"]["enabled"] is True
+    assert build_manifest["vector"]["skip_reason"] is None
+    assert build_manifest["vector_index"]["enabled"] is True
+
+
+def test_pipeline_writes_explicit_skip_vector_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_pipeline_fakes(monkeypatch, tmp_path)
+
+    skill_path = run_pipeline(
+        name="Tester",
+        texts=[{"title": "Test", "content": "hello world", "author": "Tester"}],
+        output_dir=str(tmp_path),
+        provider="claude",
+        skip_vector=True,
+    )
+
+    build_manifest = json.loads((skill_path / "build_manifest.json").read_text(encoding="utf-8"))
+    vector_manifest = json.loads(
+        (skill_path / "knowledge" / "vector_index" / "manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert build_manifest["vector"]["enabled"] is False
+    assert build_manifest["vector"]["skip_reason"] == "explicit_skip_vector"
+    assert build_manifest["vector"]["manifest_path"] == "knowledge/vector_index/manifest.json"
+    assert vector_manifest["enabled"] is False
+    assert vector_manifest["skip_reason"] == "explicit_skip_vector"
+    assert vector_manifest["person_name"] == "Tester"
+    assert vector_manifest["skill_name"] == "digital-person-Tester"
+    assert vector_manifest["chat_provider"] == "claude"
+    assert vector_manifest["chat_model"] == "fake-claude"
+    assert vector_manifest["embedding_provider"] is None
+    assert vector_manifest["embedding_model"] is None
+    assert vector_manifest["index_schema_version"] == "digital_person_vector_index/v1"
+    assert vector_manifest["source_fingerprint"]
+    assert vector_manifest["collection_name"] is None
+    assert vector_manifest["index_dir"] is None
 
 
 def test_vector_indexer_writes_versioned_manifest_and_metadata(
@@ -459,8 +500,9 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
     metadata = json.loads((index_path / "metadata.json").read_text(encoding="utf-8"))
 
     assert index_path.name == "digital_person__张三__v1_2_3"
-    assert manifest["index_schema"] == "digital_person_vector_index"
-    assert manifest["index_version"] == "1"
+    assert manifest["enabled"] is True
+    assert manifest["skip_reason"] is None
+    assert manifest["index_schema_version"] == "digital_person_vector_index/v1"
     assert manifest["skill_version"] == "1.2.3"
     assert manifest["chat_provider"] == "claude"
     assert manifest["chat_model"] == "claude-sonnet-4-20250514"
@@ -470,8 +512,28 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
     assert manifest["built_at"] == metadata["built_at"]
     assert manifest["collection_name"] == metadata["collection_name"]
     assert metadata["index_dir"] == f"knowledge/vector_index/{index_path.name}"
+    assert metadata["enabled"] is True
+    assert metadata["skip_reason"] is None
+    assert metadata["index_schema_version"] == manifest["index_schema_version"]
     assert created_clients[0].name == "digital_person__张三__v1_2_3"
-    assert created_clients[0].metadata["index_schema"] == "digital_person_vector_index"
+    assert created_clients[0].metadata["index_schema_version"] == "digital_person_vector_index/v1"
+    for field in (
+        "enabled",
+        "skip_reason",
+        "person_name",
+        "skill_name",
+        "skill_version",
+        "index_schema_version",
+        "chat_provider",
+        "chat_model",
+        "embedding_provider",
+        "embedding_model",
+        "collection_name",
+        "index_dir",
+        "source_fingerprint",
+        "built_at",
+    ):
+        assert manifest[field] == metadata[field] == created_clients[0].metadata[field]
 
 
 def test_vector_indexer_isolates_versions_and_provider_metadata(

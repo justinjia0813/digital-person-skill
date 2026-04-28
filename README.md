@@ -227,11 +227,12 @@ output/digital-person-<name>/
 补充说明：
 
 - `SKILL.md`：生成后的 persona skill 主指令
-- `config.yaml` / `build_manifest.json`：记录本次生成使用的 chat provider、embedding provider、skill version
-- `knowledge/vector_index/manifest.json`：当前激活索引的清单，包含 `person_name`、`skill_name`、`skill_version`、`chat_provider`、`chat_model`、`embedding_provider`、`embedding_model`、`collection_name`、`index_dir` 以及分块统计
+- `config.yaml` / `build_manifest.json`：记录本次生成使用的 chat provider、embedding provider、skill version；其中 `build_manifest.json` 的 `vector.enabled` / `vector.skip_reason` 会显式标记是否跳过向量索引
+- `knowledge/vector_index/manifest.json`：统一的向量索引清单。启用向量索引时，它与实际 collection metadata、版本目录下的 `metadata.json` 共享同一组核心字段：`enabled`、`skip_reason`、`person_name`、`skill_name`、`skill_version`、`index_schema_version`、`chat_provider`、`chat_model`、`embedding_provider`、`embedding_model`、`collection_name`、`index_dir`、`source_fingerprint`、`built_at`
 - `knowledge/vector_index/digital_person__<name>__v<version>/`：当前版本的本地向量索引目录；目录名与 `collection_name` 都按“人物名 + skill version”生成，例如 `digital_person__张三__v1_2_3`
 - 每次生成只会把最新一次构建结果写到根目录的 `knowledge/vector_index/manifest.json`，但实际索引文件落在对应版本目录下，所以 `v1.2.3` 与 `v1.2.4` 会天然隔离，不会共用同一个本地 Chroma 路径
-- 读取或排查向量索引时，应先看 `manifest.json` 指向的 `index_dir`，再进入该版本目录查看 `metadata.json` 与 `chroma/`
+- 如果使用 `--skip-vector`，仍会写入 `knowledge/vector_index/manifest.json`，其中 `enabled=false`、`skip_reason=explicit_skip_vector`，并保留本次生成的 provider / model / version / fingerprint 语义，便于后续补跑向量索引或排查
+- 读取或排查向量索引时，应先看 `manifest.json`：若 `enabled=true`，再根据 `index_dir` 进入对应版本目录查看 `metadata.json` 与 `chroma/`
 - `CLAUDE.md`：仅在 `--export claude` 时出现，用于 Claude Code 自定义指令
 - `chatgpt_instructions.md`：仅在 `--export chatgpt` 时出现
 
