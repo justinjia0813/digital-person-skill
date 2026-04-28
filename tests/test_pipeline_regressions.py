@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -263,6 +265,24 @@ def test_run_pipeline_validates_provider_credentials_before_loading_wechat_adapt
             skip_vector=True,
             output_dir=str(tmp_path),
         )
+
+
+def test_wechat_adapter_module_import_does_not_require_readability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "readability" or name.startswith("readability."):
+            raise ModuleNotFoundError("No module named 'readability'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    sys.modules.pop("src.adapters.wechat_mp", None)
+
+    module = importlib.import_module("src.adapters.wechat_mp")
+
+    assert hasattr(module, "WeChatMPAdapter")
 
 
 def test_resolve_runtime_settings_defaults_claude_chat_to_openai_embedding() -> None:

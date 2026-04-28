@@ -86,6 +86,8 @@ def test_cli_fails_fast_when_provider_credentials_are_missing(
 
     assert result.returncode == 1
     assert expected_hint in result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "lxml_html_clean" not in result.stderr
 
 
 @pytest.mark.integration

@@ -5,15 +5,26 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import Optional
+from functools import lru_cache
 
 import httpx
 from bs4 import BeautifulSoup
-from readability import Document
 import html2text
 
 from src.adapters.base import BaseAdapter
 from src.models import ContentItem, ContentType
+
+
+@lru_cache(maxsize=1)
+def _load_readability_document():
+    try:
+        from readability import Document
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "缺少 optional dependency: readability-lxml / lxml_html_clean。"
+            "如需解析微信公众号 HTML，请先安装 requirements.txt 中的采集依赖。"
+        ) from exc
+    return Document
 
 
 class WeChatMPAdapter(BaseAdapter):
@@ -78,6 +89,7 @@ class WeChatMPAdapter(BaseAdapter):
 
     def _parse_html(self, html: str, url: str = "") -> ContentItem:
         """解析 HTML 页面，提取正文"""
+        document_cls = _load_readability_document()
         soup = BeautifulSoup(html, "html.parser")
 
         # ── 标题提取（优先公众号专用选择器）──
@@ -95,14 +107,14 @@ class WeChatMPAdapter(BaseAdapter):
                 title = re.sub(r"\s*[-–—]\s*.*$", "", title).strip()
         # 3) 最后用 readability
         if not title:
-            doc = Document(html)
+            doc = document_cls(html)
             title = doc.title()
         # 去除可能的 "no-title" 标记
         if not title or title.lower() in ("no-title", "[no-title]"):
             title = ""
 
         # ── 正文提取 ──
-        doc = Document(html)
+        doc = document_cls(html)
         summary_html = doc.summary()
         content_md = self.h2t.handle(summary_html)
         content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()

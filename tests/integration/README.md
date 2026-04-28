@@ -25,6 +25,7 @@
 - `tests/test_pipeline_integration_real_provider.py::test_cli_fails_fast_when_provider_credentials_are_missing` 默认执行
 - `tests/test_pipeline_integration_real_provider.py::test_cli_real_provider_pipeline_with_fixture_sample` 只有在 `RUN_REAL_PROVIDER_TESTS=1` 时才执行
 - 缺凭证前置校验必须早于 `wechat_mp`/`readability` 导入链路；即使本地缺少这类采集依赖，`--skip-vector` 场景也应先看到 provider 凭证错误
+- `readability-lxml` / `lxml_html_clean` 属于可选采集依赖；本目录中的缺凭证测试会同时防回归，确保 stderr 不再退化成这类导入异常
 
 ## OpenAI 真实链路
 
