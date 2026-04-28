@@ -333,6 +333,17 @@ def run_pipeline(
             print(f"  提示：可跳过此步骤（--skip-vector），稍后手动构建")
     else:
         print("[9/9] 跳过向量索引（--skip-vector）")
+        manifest_path = VectorIndexer.write_skipped_manifest(
+            person_name=name,
+            skill_version=new_version_str,
+            runtime_settings=runtime,
+            items=items,
+            opinions=all_opinions,
+            output_dir=str(skill_path),
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+        print(f"  ✓ 已写入降级清单: {manifest_path}")
 
     try:
         ver_mgr.create_versioned_copy(skill_path, new_version_str)

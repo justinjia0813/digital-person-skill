@@ -209,18 +209,19 @@ class VersionInfo(BaseModel):
 class VectorIndexManifest(BaseModel):
     """向量索引构建清单。"""
 
+    enabled: bool = True
+    skip_reason: str | None = None
     person_name: str
     skill_name: str
     skill_version: str
-    index_schema: str
-    index_version: str
+    index_schema_version: str
     chat_provider: str
     chat_model: str
-    embedding_provider: str
-    embedding_model: str
-    collection_name: str
-    index_dir: str
-    source_fingerprint: str
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    collection_name: str | None = None
+    index_dir: str | None = None
+    source_fingerprint: str | None = None
     built_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     total_documents: int = 0
     article_chunks: int = 0

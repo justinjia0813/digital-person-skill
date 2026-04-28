@@ -16,12 +16,11 @@ from src.runtime import RuntimeSettings
 class VectorIndexer:
     """使用 ChromaDB + OpenAI 兼容 embedding API 构建向量索引"""
 
-    INDEX_SCHEMA = "digital_person_vector_index"
-    INDEX_VERSION = "1"
+    INDEX_SCHEMA_VERSION = "digital_person_vector_index/v1"
 
     def __init__(
         self,
-        embedder: BaseEmbedder,
+        embedder: BaseEmbedder | None,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ):
@@ -51,17 +50,20 @@ class VectorIndexer:
         source_fingerprint = self._source_fingerprint(items, opinions)
         collection_metadata = {
             "hnsw:space": "cosine",
-            "person_name": person_name,
-            "skill_name": skill_name,
-            "skill_version": skill_version,
-            "chat_provider": runtime_settings.chat_provider,
-            "chat_model": runtime_settings.chat_model,
-            "embedding_provider": self.embedder.provider,
-            "embedding_model": self.embedder.model,
-            "index_schema": self.INDEX_SCHEMA,
-            "index_version": self.INDEX_VERSION,
-            "built_at": built_at,
-            "source_fingerprint": source_fingerprint,
+            **self._manifest_payload(
+                enabled=True,
+                skip_reason=None,
+                person_name=person_name,
+                skill_name=skill_name,
+                skill_version=skill_version,
+                runtime_settings=runtime_settings,
+                embedding_provider=self.embedder.provider,
+                embedding_model=self.embedder.model,
+                collection_name=collection_name,
+                index_dir=str(vector_db_path.relative_to(Path(output_dir))),
+                source_fingerprint=source_fingerprint,
+                built_at=built_at,
+            ),
         }
 
         # 初始化 ChromaDB（纯本地模式）
@@ -131,19 +133,20 @@ class VectorIndexer:
 
         # ── 4. 保存元数据 ──
         metadata = {
-            "person_name": person_name,
-            "skill_name": skill_name,
-            "skill_version": skill_version,
-            "index_schema": self.INDEX_SCHEMA,
-            "index_version": self.INDEX_VERSION,
-            "chat_provider": runtime_settings.chat_provider,
-            "chat_model": runtime_settings.chat_model,
-            "embedding_provider": self.embedder.provider,
-            "embedding_model": self.embedder.model,
-            "collection_name": collection_name,
-            "index_dir": str(vector_db_path.relative_to(Path(output_dir))),
-            "source_fingerprint": source_fingerprint,
-            "built_at": built_at,
+            **self._manifest_payload(
+                enabled=True,
+                skip_reason=None,
+                person_name=person_name,
+                skill_name=skill_name,
+                skill_version=skill_version,
+                runtime_settings=runtime_settings,
+                embedding_provider=self.embedder.provider,
+                embedding_model=self.embedder.model,
+                collection_name=collection_name,
+                index_dir=str(vector_db_path.relative_to(Path(output_dir))),
+                source_fingerprint=source_fingerprint,
+                built_at=built_at,
+            ),
             "total_documents": len(doc_ids),
             "article_chunks": sum(1 for m in doc_metadatas if m["type"] == "article_chunk"),
             "opinions": sum(1 for m in doc_metadatas if m["type"] == "opinion"),
@@ -192,11 +195,87 @@ class VectorIndexer:
                 )
         return output
 
+    @classmethod
+    def write_skipped_manifest(
+        cls,
+        person_name: str,
+        skill_version: str,
+        runtime_settings: RuntimeSettings,
+        items: list[ContentItem],
+        opinions: list[Opinion],
+        output_dir: str,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        skip_reason: str = "explicit_skip_vector",
+    ) -> Path:
+        """在显式跳过向量索引时写入降级语义 manifest。"""
+        skill_name = f"digital-person-{person_name}"
+        vector_root = Path(output_dir) / "knowledge" / "vector_index"
+        vector_root.mkdir(parents=True, exist_ok=True)
+        manifest = VectorIndexManifest(
+            **cls._manifest_payload(
+                enabled=False,
+                skip_reason=skip_reason,
+                person_name=person_name,
+                skill_name=skill_name,
+                skill_version=skill_version,
+                runtime_settings=runtime_settings,
+                embedding_provider=runtime_settings.embedding_provider,
+                embedding_model=runtime_settings.embedding_model,
+                collection_name=None,
+                index_dir=None,
+                source_fingerprint=cls._source_fingerprint(items, opinions),
+                built_at=datetime.now().isoformat(),
+            ),
+            total_documents=0,
+            article_chunks=0,
+            opinions=0,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        manifest_path = vector_root / "manifest.json"
+        manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        return manifest_path
+
     @staticmethod
     def _collection_name(person_name: str, skill_version: str) -> str:
         slug = re.sub(r"[^\w-]+", "_", person_name, flags=re.UNICODE).strip("_") or "person"
         version_slug = skill_version.replace(".", "_")
         return f"digital_person__{slug}__v{version_slug}"
+
+    @classmethod
+    def _manifest_payload(
+        cls,
+        *,
+        enabled: bool,
+        skip_reason: str | None,
+        person_name: str,
+        skill_name: str,
+        skill_version: str,
+        runtime_settings: RuntimeSettings,
+        embedding_provider: str | None,
+        embedding_model: str | None,
+        collection_name: str | None,
+        index_dir: str | None,
+        source_fingerprint: str | None,
+        built_at: str,
+    ) -> dict[str, object]:
+        return {
+            "enabled": enabled,
+            "skip_reason": skip_reason,
+            "person_name": person_name,
+            "skill_name": skill_name,
+            "skill_version": skill_version,
+            "index_schema_version": cls.INDEX_SCHEMA_VERSION,
+            "chat_provider": runtime_settings.chat_provider,
+            "chat_model": runtime_settings.chat_model,
+            "embedding_provider": embedding_provider,
+            "embedding_model": embedding_model,
+            "collection_name": collection_name,
+            "index_dir": index_dir,
+            "source_fingerprint": source_fingerprint,
+            "built_at": built_at,
+        }
 
     @staticmethod
     def _source_fingerprint(items: list[ContentItem], opinions: list[Opinion]) -> str:
