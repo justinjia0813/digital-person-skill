@@ -24,6 +24,7 @@ from src.models import (
     StanceSnapshot,
     StyleProfile,
     Topic,
+    VectorIndexManifest,
 )
 from src.runtime import RuntimeSettings
 from src.pipeline import PipelineStageError, run_pipeline
@@ -421,6 +422,8 @@ def test_pipeline_writes_explicit_skip_vector_manifest(
     assert build_manifest["vector"]["enabled"] is False
     assert build_manifest["vector"]["skip_reason"] == "explicit_skip_vector"
     assert build_manifest["vector"]["manifest_path"] == "knowledge/vector_index/manifest.json"
+    assert build_manifest["vector_index"]["enabled"] is False
+    assert build_manifest["vector_index"]["skip_reason"] == "explicit_skip_vector"
     assert vector_manifest["enabled"] is False
     assert vector_manifest["skip_reason"] == "explicit_skip_vector"
     assert vector_manifest["person_name"] == "Tester"
@@ -433,6 +436,27 @@ def test_pipeline_writes_explicit_skip_vector_manifest(
     assert vector_manifest["source_fingerprint"]
     assert vector_manifest["collection_name"] is None
     assert vector_manifest["index_dir"] is None
+    assert set(vector_manifest) == {
+        "enabled",
+        "skip_reason",
+        "person_name",
+        "skill_name",
+        "skill_version",
+        "index_schema_version",
+        "chat_provider",
+        "chat_model",
+        "embedding_provider",
+        "embedding_model",
+        "collection_name",
+        "index_dir",
+        "source_fingerprint",
+        "built_at",
+        "total_documents",
+        "article_chunks",
+        "opinions",
+        "chunk_size",
+        "chunk_overlap",
+    }
 
 
 def test_vector_indexer_writes_versioned_manifest_and_metadata(
@@ -498,6 +522,7 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
 
     manifest = json.loads((tmp_path / "knowledge" / "vector_index" / "manifest.json").read_text(encoding="utf-8"))
     metadata = json.loads((index_path / "metadata.json").read_text(encoding="utf-8"))
+    collection_metadata = created_clients[0].metadata
 
     assert index_path.name == "digital_person__张三__v1_2_3"
     assert manifest["enabled"] is True
@@ -516,8 +541,8 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
     assert metadata["skip_reason"] is None
     assert metadata["index_schema_version"] == manifest["index_schema_version"]
     assert created_clients[0].name == "digital_person__张三__v1_2_3"
-    assert created_clients[0].metadata["index_schema_version"] == "digital_person_vector_index/v1"
-    for field in (
+    assert collection_metadata["index_schema_version"] == "digital_person_vector_index/v1"
+    assert set(manifest) == {
         "enabled",
         "skip_reason",
         "person_name",
@@ -532,8 +557,24 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
         "index_dir",
         "source_fingerprint",
         "built_at",
+        "total_documents",
+        "article_chunks",
+        "opinions",
+        "chunk_size",
+        "chunk_overlap",
+    }
+    assert set(metadata) == set(manifest)
+    assert set(collection_metadata) == {"hnsw:space", *VectorIndexManifest.CORE_FIELD_NAMES}
+    for field in VectorIndexManifest.CORE_FIELD_NAMES:
+        assert manifest[field] == metadata[field] == collection_metadata[field]
+    for field in (
+        "total_documents",
+        "article_chunks",
+        "opinions",
+        "chunk_size",
+        "chunk_overlap",
     ):
-        assert manifest[field] == metadata[field] == created_clients[0].metadata[field]
+        assert manifest[field] == metadata[field]
 
 
 def test_vector_indexer_isolates_versions_and_provider_metadata(
