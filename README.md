@@ -33,7 +33,7 @@ skill 会引导你完成内容采集、流水线运行和结果部署。
 
 ### 部署生成的分身
 
-流水线输出的 `CLAUDE.md` 可直接作为 Claude Code 项目自定义指令使用：
+当命令显式带上 `--export claude` 时，流水线会额外生成 `CLAUDE.md`，可直接作为 Claude Code 项目自定义指令使用：
 
 ```bash
 # 方式一：复制到项目级 CLAUDE.md
@@ -78,7 +78,6 @@ python run_web.py
 ```
 output/digital-person-<name>/
 ├── SKILL.md              # Skill 主指令
-├── CLAUDE.md             # Claude Code 自定义指令
 ├── config.yaml           # 元数据与版本
 ├── CHANGELOG.md          # 变更日志
 ├── profile/
@@ -94,6 +93,8 @@ output/digital-person-<name>/
 │   └── decisions_log.json    # 决策日志
 └── versions/             # 历史版本归档
 ```
+
+仅当使用 `--export claude` 时，目录中才会出现 `CLAUDE.md`。
 
 ## 技术栈
 

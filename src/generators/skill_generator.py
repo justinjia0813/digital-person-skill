@@ -186,7 +186,7 @@ class SkillGenerator:
         )
 
         # ── 生成 decisions.md（决策框架）──
-        if decision_model:
+        if self._has_decision_content(decision_model):
             decisions_md = self._generate_decisions(name, decision_model)
             (profile_dir / "decisions.md").write_text(decisions_md, encoding="utf-8")
 
@@ -214,7 +214,7 @@ class SkillGenerator:
             )
 
         # ── Phase 3: 决策日志 ──
-        if decision_model:
+        if self._has_decision_content(decision_model):
             decisions_log = {
                 "patterns": decision_model.patterns,
                 "checklists": [
@@ -270,6 +270,13 @@ class SkillGenerator:
                 shutil.rmtree(backup_base)
 
         return base
+
+    @staticmethod
+    def _has_decision_content(decision_model: DecisionModel | None) -> bool:
+        return bool(
+            decision_model
+            and (decision_model.patterns or decision_model.checklists)
+        )
 
     def _generate_decisions(self, name: str, decision_model: DecisionModel) -> str:
         """生成决策框架文件"""
