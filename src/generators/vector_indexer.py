@@ -179,6 +179,7 @@ class VectorIndexer:
             chunk = chunk.strip()
             if chunk:
                 chunks.append(chunk)
-            start += len(chunk) - overlap if chunk else chunk_size
+            step = len(chunk) - overlap if chunk else chunk_size
+            start += max(step, 1)
 
         return chunks

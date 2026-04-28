@@ -7,6 +7,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 from src.models import VersionInfo
 
 
@@ -21,8 +23,6 @@ class VersionManager:
         config_path = skill_dir / "config.yaml"
         if not config_path.exists():
             return None
-
-        import yaml
 
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
@@ -44,6 +44,7 @@ class VersionManager:
                 article_count = len(json.load(f))
 
         return VersionInfo(
+            person_name=config.get("person_name", ""),
             version=version,
             created_at=created_at,
             article_count=article_count,
@@ -60,7 +61,7 @@ class VersionManager:
         # 只归档关键文件（不包含 vector_db）
         versions_dir.mkdir(parents=True, exist_ok=True)
 
-        for subdir in ["profile", "knowledge"]:
+        for subdir in ["profile", "knowledge", "memory"]:
             src = skill_dir / subdir
             dst = versions_dir / subdir
             if src.exists():
@@ -109,7 +110,7 @@ class VersionManager:
         if changelog_path.exists():
             existing = changelog_path.read_text(encoding="utf-8")
 
-        header = f"# {new_version.person_name if hasattr(new_version, 'person_name') else 'Digital Person'} 变更日志\n\n"
+        header = f"# {new_version.person_name or 'Digital Person'} 变更日志\n\n"
         new_content = header + "\n\n".join(entries)
         if existing and "# " in existing:
             # 保留旧条目
@@ -117,6 +118,20 @@ class VersionManager:
             new_content = header + "\n\n".join(entries) + "\n\n" + old_entries
 
         return new_content
+
+    def update_skill_config_version(self, skill_dir: Path, version: str) -> None:
+        """回写最终版本号，确保配置与归档一致。"""
+        config_path = skill_dir / "config.yaml"
+        if not config_path.exists():
+            return
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+        config["version"] = version
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
 
     @staticmethod
     def increment_version(old_version: str | None, has_breaking: bool = False) -> str:

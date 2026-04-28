@@ -194,6 +194,7 @@ class OpinionEvolution(BaseModel):
 class VersionInfo(BaseModel):
     """Skill 包版本信息"""
 
+    person_name: str = ""
     version: str = "1.0.0"
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     article_count: int = 0

@@ -29,6 +29,10 @@ from src.generators.version_manager import VersionManager
 from src.generators.exporters import get_exporter
 
 
+class PipelineStageError(RuntimeError):
+    """关键阶段失败时抛出，供 CLI 返回非零退出码。"""
+
+
 def run_pipeline(
     name: str,
     urls: list[str] | None = None,
@@ -161,16 +165,21 @@ def run_pipeline(
     # 4b. 主题提取
     print("  提取主题...")
     all_topics = []
+    topic_failures = []
     for item in items:
         try:
             topics = topic_ext.extract(item)
             all_topics.append(topics)
         except Exception as e:
+            topic_failures.append(item.title or item.id)
             print(f"  [WARN] 主题提取失败 ({item.title[:20]}): {e}")
+    if topic_failures:
+        raise PipelineStageError(f"主题提取失败 {len(topic_failures)} 篇，已中止生成")
 
     # 4c. 观点提取
     print("  提取观点...")
     all_opinions = []
+    opinion_failures = []
     for item in items:
         try:
             opinions = opinion_ext.extract(item)
@@ -178,7 +187,12 @@ def run_pipeline(
             if opinions:
                 print(f"  ✓ {item.title[:30]}... → {len(opinions)} 个观点")
         except Exception as e:
+            opinion_failures.append(item.title or item.id)
             print(f"  [WARN] 观点提取失败 ({item.title[:20]}): {e}")
+    if opinion_failures:
+        raise PipelineStageError(f"观点提取失败 {len(opinion_failures)} 篇，已中止生成")
+    if not all_opinions:
+        raise PipelineStageError("观点提取结果为空，已中止生成")
 
     print(f"  共提取 {len(all_opinions)} 个观点")
 
@@ -187,9 +201,7 @@ def run_pipeline(
     try:
         style = style_analyzer.analyze(items)
     except Exception as e:
-        print(f"  [WARN] 风格分析失败: {e}")
-        from src.models import StyleProfile
-        style = StyleProfile()
+        raise PipelineStageError(f"风格分析失败: {e}") from e
 
     # ── 5. 决策框架 + 知识图谱 ──
     print("[5/9] 提取决策框架和知识图谱...")
@@ -200,7 +212,7 @@ def run_pipeline(
         decision_model = decision_ext.extract(all_opinions)
         print(f"  ✓ 提取 {len(decision_model.checklists)} 个决策场景, {len(decision_model.patterns)} 条模式")
     except Exception as e:
-        print(f"  [WARN] 决策提取失败: {e}")
+        raise PipelineStageError(f"决策提取失败: {e}") from e
 
     kg_data = None
     kg_triplets = []
@@ -210,7 +222,7 @@ def run_pipeline(
         kg_triplets = kg_builder.to_triplets(kg_data)
         print(f"  ✓ 知识图谱：{len(kg_data.nodes)} 个实体, {len(kg_data.edges)} 条关系")
     except Exception as e:
-        print(f"  [WARN] 知识图谱生成失败: {e}")
+        raise PipelineStageError(f"知识图谱生成失败: {e}") from e
 
     # ── 6. 观点演化追踪 ──
     print("[6/9] 观点演化追踪...")
@@ -221,7 +233,7 @@ def run_pipeline(
         changed = sum(1 for e in evolutions if e.stance_changed)
         print(f"  ✓ 追踪 {len(evolutions)} 个领域, {changed} 个领域立场有变化")
     except Exception as e:
-        print(f"  [WARN] 观点演化追踪失败: {e}")
+        raise PipelineStageError(f"观点演化追踪失败: {e}") from e
 
     # ── 7. 认知建模（LLM 增强） ──
     print("[7/9] 认知建模...")
@@ -231,10 +243,17 @@ def run_pipeline(
         cognitive_data = profiler.profile(all_opinions, style, all_topics, items)
         print(f"  ✓ 认知模型生成完成")
     except Exception as e:
-        print(f"  [WARN] 认知建模失败: {e}")
+        raise PipelineStageError(f"认知建模失败: {e}") from e
 
     # ── 8. 生成 Skill 包 ──
     print("[8/9] 生成 Skill 包...")
+    skill_dir = Path(output_dir) / f"digital-person-{name}"
+    ver_mgr = VersionManager(output_dir)
+    old_version = ver_mgr.detect_current_version(skill_dir)
+    new_version_str = ver_mgr.increment_version(
+        old_version.version if old_version else None
+    )
+
     generator = SkillGenerator()
     skill_path = generator.generate(
         name=name,
@@ -243,6 +262,7 @@ def run_pipeline(
         opinions=all_opinions,
         style=style,
         output_dir=output_dir,
+        version=new_version_str,
         decision_model=decision_model,
         kg_data=kg_data,
         kg_triplets=kg_triplets,
@@ -252,15 +272,10 @@ def run_pipeline(
 
     # ── 版本管理 ──
     try:
-        ver_mgr = VersionManager(output_dir)
-        old_version = ver_mgr.detect_current_version(skill_path)
-        new_version_str = ver_mgr.increment_version(
-            old_version.version if old_version else None
-        )
-
         # 生成 CHANGELOG
         from src.models import VersionInfo
         new_version = VersionInfo(
+            person_name=name,
             version=new_version_str,
             article_count=len(items),
             opinion_count=len(all_opinions),
@@ -268,12 +283,13 @@ def run_pipeline(
         )
         changelog = ver_mgr.generate_changelog(skill_path, old_version, new_version)
         (skill_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+        ver_mgr.update_skill_config_version(skill_path, new_version_str)
 
         # 版本归档
         ver_mgr.create_versioned_copy(skill_path, new_version_str)
         print(f"  ✓ 版本 v{new_version_str}")
     except Exception as e:
-        print(f"  [WARN] 版本管理失败: {e}")
+        raise PipelineStageError(f"版本管理失败: {e}") from e
 
     # ── 多格式导出 ──
     if export_format:
@@ -282,7 +298,7 @@ def run_pipeline(
             export_path = exporter.export(skill_path, name)
             print(f"  ✓ 导出 {export_format} 格式: {export_path.name}")
         except Exception as e:
-            print(f"  [WARN] 导出失败: {e}")
+            raise PipelineStageError(f"导出失败: {e}") from e
 
     # ── 9. 向量索引 ──
     if not skip_vector:
@@ -375,4 +391,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except PipelineStageError as exc:
+        print(f"\n失败：{exc}", file=sys.stderr)
+        sys.exit(1)

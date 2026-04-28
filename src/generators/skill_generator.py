@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -124,6 +126,7 @@ class SkillGenerator:
         opinions: list[Opinion],
         style: StyleProfile,
         output_dir: str,
+        version: str,
         decision_model: DecisionModel | None = None,
         kg_data: KnowledgeGraphData | None = None,
         kg_triplets: list[dict] | None = None,
@@ -132,18 +135,19 @@ class SkillGenerator:
     ) -> Path:
         """生成完整的 Skill 包"""
         base = Path(output_dir) / f"digital-person-{name}"
-        base.mkdir(parents=True, exist_ok=True)
+        temp_base = base.parent / f".{base.name}.tmp-{uuid.uuid4().hex[:8]}"
+        temp_base.mkdir(parents=True, exist_ok=False)
 
         # profile/
-        profile_dir = base / "profile"
+        profile_dir = temp_base / "profile"
         profile_dir.mkdir(exist_ok=True)
 
         # knowledge/
-        knowledge_dir = base / "knowledge"
+        knowledge_dir = temp_base / "knowledge"
         knowledge_dir.mkdir(exist_ok=True)
 
         # memory/（Phase 3 新增）
-        memory_dir = base / "memory"
+        memory_dir = temp_base / "memory"
         memory_dir.mkdir(exist_ok=True)
 
         # ── 生成 soul.md ──
@@ -231,9 +235,10 @@ class SkillGenerator:
         # ── 生成 config.yaml ──
         config = SkillConfig(
             person_name=name,
+            version=version,
             data_sources=self._summarize_sources(items),
         )
-        (base / "config.yaml").write_text(
+        (temp_base / "config.yaml").write_text(
             yaml.dump(config.model_dump(), allow_unicode=True, default_flow_style=False),
             encoding="utf-8",
         )
@@ -247,7 +252,22 @@ class SkillGenerator:
             created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
             source_count=len(items),
         )
-        (base / "SKILL.md").write_text(skill_md, encoding="utf-8")
+        (temp_base / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
+        backup_base = None
+        if base.exists():
+            backup_base = base.parent / f".{base.name}.bak-{uuid.uuid4().hex[:8]}"
+            base.rename(backup_base)
+
+        try:
+            temp_base.rename(base)
+        except Exception:
+            if backup_base and backup_base.exists():
+                backup_base.rename(base)
+            raise
+        else:
+            if backup_base and backup_base.exists():
+                shutil.rmtree(backup_base)
 
         return base
 
