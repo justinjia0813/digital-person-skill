@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 
 from src.config import get_settings
-from src.llm import create_llm
-from src.llm.base import BaseLLM
 from src.adapters.wechat_mp import WeChatMPAdapter
 from src.adapters.weibo import WeiboAdapter
 from src.adapters.twitter import TwitterAdapter
@@ -27,36 +25,31 @@ from src.generators.skill_generator import SkillGenerator
 from src.generators.vector_indexer import VectorIndexer
 from src.generators.version_manager import VersionManager
 from src.generators.exporters import get_exporter
+from src.runtime import ProviderRegistry
 
 
 class PipelineStageError(RuntimeError):
     """关键阶段失败时抛出，供 CLI 返回非零退出码。"""
 
 
-def validate_provider_config(provider: str, settings) -> None:
-    """在真正创建客户端前校验 provider 配置，避免延迟到网络调用阶段才报错。"""
+def resolve_runtime_settings(
+    settings,
+    provider: str | None,
+    embedding_provider: str | None,
+    skip_vector: bool,
+):
+    """解析 provider 组合并提前完成配置校验。"""
 
-    if provider == "openai":
-        if not settings.openai_api_key:
-            raise PipelineStageError(
-                "provider=openai 但未配置 OPENAI_API_KEY。"
-                "可在 .env 中设置，或改用 --provider claude。"
-            )
-        if not settings.openai_model:
-            raise PipelineStageError("provider=openai 但未配置 OPENAI_MODEL。")
-        return
-
-    if provider == "claude":
-        if not settings.anthropic_api_key:
-            raise PipelineStageError(
-                "provider=claude 但未配置 ANTHROPIC_API_KEY。"
-                "可在 .env 中设置，或改用 --provider openai。"
-            )
-        if not settings.anthropic_model:
-            raise PipelineStageError("provider=claude 但未配置 ANTHROPIC_MODEL。")
-        return
-
-    raise PipelineStageError(f"不支持的 provider: {provider}")
+    registry = ProviderRegistry(settings)
+    try:
+        runtime = registry.resolve_runtime_settings(
+            chat_provider=provider,
+            embedding_provider=embedding_provider,
+            skip_vector=skip_vector,
+        )
+    except ValueError as exc:
+        raise PipelineStageError(str(exc)) from exc
+    return registry, runtime
 
 
 def run_pipeline(
@@ -67,6 +60,7 @@ def run_pipeline(
     input_format: str = "auto",
     texts: list[dict] | None = None,
     provider: str | None = None,
+    embedding_provider: str | None = None,
     output_dir: str | None = None,
     skip_vector: bool = False,
     export_format: str | None = None,
@@ -74,26 +68,17 @@ def run_pipeline(
     """运行完整流水线，返回生成的 Skill 包路径"""
 
     settings = get_settings()
-    provider = provider or settings.llm_provider
     output_dir = output_dir or settings.output_dir
+    registry, runtime = resolve_runtime_settings(
+        settings=settings,
+        provider=provider,
+        embedding_provider=embedding_provider,
+        skip_vector=skip_vector,
+    )
 
     # ── 1. 创建 LLM 客户端 ──
-    print(f"[1/9] 初始化 LLM 客户端 ({provider})...")
-    validate_provider_config(provider, settings)
-    llm_kwargs = {}
-    if provider == "openai":
-        llm_kwargs = {
-            "api_key": settings.openai_api_key,
-            "model": settings.openai_model,
-            "base_url": settings.openai_base_url,
-        }
-    elif provider == "claude":
-        llm_kwargs = {
-            "api_key": settings.anthropic_api_key,
-            "model": settings.anthropic_model,
-            "base_url": settings.anthropic_base_url,
-        }
-    llm = create_llm(provider, **llm_kwargs)
+    print(f"[1/9] 初始化 LLM 客户端 ({runtime.chat_provider})...")
+    llm = registry.create_llm(runtime)
 
     # ── 2. 采集内容 ──
     print("[2/9] 采集内容...")
@@ -295,9 +280,10 @@ def run_pipeline(
         kg_triplets=kg_triplets,
         evolutions=evolutions,
         cognitive_data=cognitive_data,
+        runtime_settings=runtime,
     )
 
-    # ── 版本管理 ──
+    # ── 版本管理（先写主配置，索引完成后再归档） ──
     try:
         # 生成 CHANGELOG
         from src.models import VersionInfo
@@ -311,10 +297,6 @@ def run_pipeline(
         changelog = ver_mgr.generate_changelog(skill_path, old_version, new_version)
         (skill_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
         ver_mgr.update_skill_config_version(skill_path, new_version_str)
-
-        # 版本归档
-        ver_mgr.create_versioned_copy(skill_path, new_version_str)
-        print(f"  ✓ 版本 v{new_version_str}")
     except Exception as e:
         raise PipelineStageError(f"版本管理失败: {e}") from e
 
@@ -331,20 +313,32 @@ def run_pipeline(
     if not skip_vector:
         print("[9/9] 构建向量索引...")
         try:
+            embedder = registry.create_embedder(runtime)
             indexer = VectorIndexer(
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url.rstrip("/"),
-                embedding_model=settings.embedding_model,
+                embedder=embedder,
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,
             )
-            db_path = indexer.build_index(items, all_opinions, str(skill_path))
+            db_path = indexer.build_index(
+                person_name=name,
+                skill_version=new_version_str,
+                runtime_settings=runtime,
+                items=items,
+                opinions=all_opinions,
+                output_dir=str(skill_path),
+            )
             print(f"  ✓ 向量索引已生成到 {db_path}")
         except Exception as e:
             print(f"  [WARN] 向量索引构建失败: {e}")
             print(f"  提示：可跳过此步骤（--skip-vector），稍后手动构建")
     else:
         print("[9/9] 跳过向量索引（--skip-vector）")
+
+    try:
+        ver_mgr.create_versioned_copy(skill_path, new_version_str)
+        print(f"  ✓ 版本 v{new_version_str}")
+    except Exception as e:
+        raise PipelineStageError(f"版本归档失败: {e}") from e
 
     # ── 完成 ──
     manifest = _read_build_manifest(skill_path)
@@ -407,6 +401,11 @@ def main():
         choices=["openai", "claude"],
         help="LLM 提供商（默认从 .env 读取）",
     )
+    parser.add_argument(
+        "--embedding-provider",
+        choices=["openai"],
+        help="Embedding 提供商（默认按运行时规则推导）",
+    )
     parser.add_argument("--output", help="输出目录（默认 ./output）")
     parser.add_argument("--skip-vector", action="store_true", help="跳过向量索引构建")
     parser.add_argument(
@@ -429,6 +428,7 @@ def main():
         source=args.source,
         input_format=args.format,
         provider=args.provider,
+        embedding_provider=args.embedding_provider,
         output_dir=args.output,
         skip_vector=args.skip_vector,
         export_format=args.export,

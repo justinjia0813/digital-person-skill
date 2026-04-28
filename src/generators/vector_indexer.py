@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
-from src.models import ContentItem, Opinion
+from src.embeddings import BaseEmbedder
+from src.models import ContentItem, Opinion, VectorIndexManifest
+from src.runtime import RuntimeSettings
 
 
 class VectorIndexer:
@@ -13,35 +16,38 @@ class VectorIndexer:
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        embedding_model: str = "embedding-3",
+        embedder: BaseEmbedder,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.embedding_model = embedding_model
+        self.embedder = embedder
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
     def build_index(
         self,
+        person_name: str,
+        skill_version: str,
+        runtime_settings: RuntimeSettings,
         items: list[ContentItem],
         opinions: list[Opinion],
         output_dir: str,
     ) -> Path:
-        """构建向量索引，输出到 knowledge/vector_db/"""
+        """构建向量索引，输出到 knowledge/vector_index/<version>/。"""
         import chromadb
 
-        vector_db_path = Path(output_dir) / "knowledge" / "vector_db"
-        vector_db_path.mkdir(parents=True, exist_ok=True)
+        skill_name = f"digital-person-{person_name}"
+        collection_name = self._collection_name(person_name, skill_version)
+        vector_root = Path(output_dir) / "knowledge" / "vector_index"
+        vector_db_path = vector_root / collection_name
+        chroma_path = vector_db_path / "chroma"
+        chroma_path.mkdir(parents=True, exist_ok=True)
 
         # 初始化 ChromaDB（纯本地模式）
-        client = chromadb.PersistentClient(path=str(vector_db_path))
+        client = chromadb.PersistentClient(path=str(chroma_path))
 
         # 使用 OpenAI 兼容的 embedding 函数
-        embedding_fn = self._create_embedding_function()
+        embedding_fn = self.embedder.create_embedding_function()
         collection = client.get_or_create_collection(
             name="digital_person",
             embedding_function=embedding_fn,
@@ -104,15 +110,28 @@ class VectorIndexer:
 
         # ── 4. 保存元数据 ──
         metadata = {
+            "person_name": person_name,
+            "skill_name": skill_name,
+            "skill_version": skill_version,
+            "chat_provider": runtime_settings.chat_provider,
+            "chat_model": runtime_settings.chat_model,
+            "embedding_provider": self.embedder.provider,
+            "embedding_model": self.embedder.model,
+            "collection_name": collection_name,
+            "index_dir": str(vector_db_path.relative_to(Path(output_dir))),
             "total_documents": len(doc_ids),
             "article_chunks": sum(1 for m in doc_metadatas if m["type"] == "article_chunk"),
             "opinions": sum(1 for m in doc_metadatas if m["type"] == "opinion"),
-            "embedding_model": self.embedding_model,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
         }
         (vector_db_path / "metadata.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        manifest = VectorIndexManifest(**metadata)
+        (vector_root / "manifest.json").write_text(
+            manifest.model_dump_json(indent=2),
             encoding="utf-8",
         )
 
@@ -122,10 +141,12 @@ class VectorIndexer:
         """查询向量索引"""
         import chromadb
 
-        client = chromadb.PersistentClient(path=vector_db_path)
-        embedding_fn = self._create_embedding_function()
+        vector_path = Path(vector_db_path)
+        metadata = json.loads((vector_path / "metadata.json").read_text(encoding="utf-8"))
+        client = chromadb.PersistentClient(path=str(vector_path / "chroma"))
+        embedding_fn = self.embedder.create_embedding_function()
         collection = client.get_collection(
-            name="digital_person",
+            name=metadata["collection_name"],
             embedding_function=embedding_fn,
         )
 
@@ -146,15 +167,11 @@ class VectorIndexer:
                 )
         return output
 
-    def _create_embedding_function(self):
-        """创建智谱兼容的 embedding 函数"""
-        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-
-        return OpenAIEmbeddingFunction(
-            api_key=self.api_key,
-            model_name=self.embedding_model,
-            api_base=self.base_url,
-        )
+    @staticmethod
+    def _collection_name(person_name: str, skill_version: str) -> str:
+        slug = re.sub(r"[^\w-]+", "_", person_name, flags=re.UNICODE).strip("_") or "person"
+        version_slug = skill_version.replace(".", "_")
+        return f"digital_person__{slug}__v{version_slug}"
 
     @staticmethod
     def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:

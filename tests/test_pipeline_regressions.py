@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,8 +25,9 @@ from src.models import (
     StyleProfile,
     Topic,
 )
+from src.runtime import RuntimeSettings
 from src.pipeline import PipelineStageError, run_pipeline
-from src.pipeline import validate_provider_config
+from src.pipeline import resolve_runtime_settings
 
 
 def _make_item() -> ContentItem:
@@ -61,16 +63,18 @@ def _install_pipeline_fakes(monkeypatch: pytest.MonkeyPatch, output_dir: Path) -
         openai_api_key="test-openai-key",
         openai_model="fake-model",
         openai_base_url="https://example.com",
+        openai_embedding_model="text-embedding-3-small",
         anthropic_api_key="test-anthropic-key",
         anthropic_model="fake-claude",
         anthropic_base_url="https://example.com",
+        embedding_provider="",
         embedding_model="embedding-3",
         chunk_size=40,
         chunk_overlap=10,
         output_dir=str(output_dir),
     )
     monkeypatch.setattr("src.pipeline.get_settings", lambda: settings)
-    monkeypatch.setattr("src.pipeline.create_llm", lambda provider, **kwargs: object())
+    monkeypatch.setattr("src.runtime.ProviderRegistry.create_llm", lambda self, runtime: object())
 
     class FakeAdapter:
         def fetch_from_text(self, title: str, content: str, author: str = "") -> ContentItem:
@@ -189,28 +193,89 @@ def test_pipeline_raises_on_critical_stage_failure(monkeypatch: pytest.MonkeyPat
         )
 
 
-def test_validate_provider_config_requires_openai_key() -> None:
+def test_resolve_runtime_settings_requires_openai_key_for_openai_chat() -> None:
     settings = SimpleNamespace(
         openai_api_key="",
         openai_model="gpt-4o",
+        openai_embedding_model="text-embedding-3-small",
+        embedding_provider="",
+        llm_provider="openai",
         anthropic_api_key="anthropic-key",
         anthropic_model="claude-sonnet-4-20250514",
+        openai_base_url="https://example.com",
+        anthropic_base_url="https://example.com",
+        embedding_model="embedding-3",
     )
 
     with pytest.raises(PipelineStageError, match="OPENAI_API_KEY"):
-        validate_provider_config("openai", settings)
+        resolve_runtime_settings(settings, provider="openai", embedding_provider=None, skip_vector=True)
 
 
-def test_validate_provider_config_requires_anthropic_key() -> None:
+def test_resolve_runtime_settings_requires_anthropic_key_for_claude_chat() -> None:
     settings = SimpleNamespace(
         openai_api_key="openai-key",
         openai_model="gpt-4o",
+        openai_embedding_model="text-embedding-3-small",
+        embedding_provider="",
+        llm_provider="openai",
         anthropic_api_key="",
         anthropic_model="claude-sonnet-4-20250514",
+        openai_base_url="https://example.com",
+        anthropic_base_url="https://example.com",
+        embedding_model="embedding-3",
     )
 
     with pytest.raises(PipelineStageError, match="ANTHROPIC_API_KEY"):
-        validate_provider_config("claude", settings)
+        resolve_runtime_settings(settings, provider="claude", embedding_provider=None, skip_vector=True)
+
+
+def test_resolve_runtime_settings_defaults_claude_chat_to_openai_embedding() -> None:
+    settings = SimpleNamespace(
+        openai_api_key="openai-key",
+        openai_model="gpt-4o",
+        openai_embedding_model="text-embedding-3-large",
+        embedding_provider="",
+        llm_provider="claude",
+        anthropic_api_key="anthropic-key",
+        anthropic_model="claude-sonnet-4-20250514",
+        openai_base_url="https://example.com",
+        anthropic_base_url="https://example.com",
+        embedding_model="embedding-3",
+    )
+
+    _, runtime = resolve_runtime_settings(
+        settings,
+        provider="claude",
+        embedding_provider=None,
+        skip_vector=False,
+    )
+
+    assert runtime.chat_provider == "claude"
+    assert runtime.embedding_provider == "openai"
+    assert runtime.embedding_model == "text-embedding-3-large"
+
+
+def test_resolve_runtime_settings_rejects_unsupported_embedding_provider() -> None:
+    settings = SimpleNamespace(
+        openai_api_key="openai-key",
+        openai_model="gpt-4o",
+        openai_embedding_model="text-embedding-3-small",
+        embedding_provider="",
+        llm_provider="openai",
+        anthropic_api_key="anthropic-key",
+        anthropic_model="claude-sonnet-4-20250514",
+        openai_base_url="https://example.com",
+        anthropic_base_url="https://example.com",
+        embedding_model="embedding-3",
+    )
+
+    with pytest.raises(PipelineStageError, match="embedding provider"):
+        resolve_runtime_settings(
+            settings,
+            provider="claude",
+            embedding_provider="claude",
+            skip_vector=False,
+        )
 
 
 def test_repeated_generation_cleans_stale_files_and_keeps_versions_consistent(
@@ -265,6 +330,126 @@ def test_chunking_short_tail_terminates() -> None:
     assert chunks
     assert "".join(chunks).startswith("A")
     assert len(chunks) <= 55
+
+
+def test_pipeline_uses_explicit_embedding_provider_when_vector_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_pipeline_fakes(monkeypatch, tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeVectorIndexer:
+        def __init__(self, embedder, chunk_size: int, chunk_overlap: int):
+            captured["embedder_provider"] = embedder.provider
+            captured["embedder_model"] = embedder.model
+            captured["chunk_size"] = chunk_size
+            captured["chunk_overlap"] = chunk_overlap
+
+        def build_index(self, person_name, skill_version, runtime_settings, items, opinions, output_dir):
+            vector_dir = Path(output_dir) / "knowledge" / "vector_index" / f"{person_name}-{skill_version}"
+            vector_dir.mkdir(parents=True, exist_ok=True)
+            (vector_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "person_name": person_name,
+                        "skill_version": skill_version,
+                        "chat_provider": runtime_settings.chat_provider,
+                        "embedding_provider": runtime_settings.embedding_provider,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            captured["output_dir"] = output_dir
+            return vector_dir
+
+    monkeypatch.setattr("src.pipeline.VectorIndexer", FakeVectorIndexer)
+
+    skill_path = run_pipeline(
+        name="Tester",
+        texts=[{"title": "Test", "content": "hello world", "author": "Tester"}],
+        output_dir=str(tmp_path),
+        provider="claude",
+        embedding_provider="openai",
+        skip_vector=False,
+    )
+
+    config = yaml.safe_load((skill_path / "config.yaml").read_text(encoding="utf-8"))
+
+    assert captured["embedder_provider"] == "openai"
+    assert captured["embedder_model"] == "text-embedding-3-small"
+    assert Path(captured["output_dir"]) == skill_path
+    assert config["llm_provider"] == "claude"
+    assert config["embedding_provider"] == "openai"
+    assert config["embedding_model"] == "text-embedding-3-small"
+
+
+def test_vector_indexer_writes_versioned_manifest_and_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from src.embeddings import BaseEmbedder
+    from src.generators.vector_indexer import VectorIndexer
+
+    class FakeCollection:
+        def __init__(self):
+            self.upserts = []
+
+        def upsert(self, ids, documents, metadatas):
+            self.upserts.append((ids, documents, metadatas))
+
+    class FakeClient:
+        def __init__(self, path: str):
+            self.path = path
+            self.collection = FakeCollection()
+
+        def get_or_create_collection(self, name, embedding_function, metadata):
+            self.name = name
+            self.embedding_function = embedding_function
+            self.metadata = metadata
+            return self.collection
+
+        def get_collection(self, name, embedding_function):
+            return self.collection
+
+    fake_chromadb = SimpleNamespace(PersistentClient=FakeClient)
+    monkeypatch.setitem(sys.modules, "chromadb", fake_chromadb)
+
+    class FakeEmbedder(BaseEmbedder):
+        provider = "openai"
+        model = "text-embedding-3-small"
+
+        def create_embedding_function(self):
+            return object()
+
+    runtime = RuntimeSettings(
+        chat_provider="claude",
+        chat_model="claude-sonnet-4-20250514",
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        skip_vector=False,
+    )
+
+    index_path = VectorIndexer(
+        embedder=FakeEmbedder(),
+        chunk_size=40,
+        chunk_overlap=10,
+    ).build_index(
+        person_name="张三",
+        skill_version="1.2.3",
+        runtime_settings=runtime,
+        items=[_make_item()],
+        opinions=[_make_opinion()],
+        output_dir=str(tmp_path),
+    )
+
+    manifest = json.loads((tmp_path / "knowledge" / "vector_index" / "manifest.json").read_text(encoding="utf-8"))
+    metadata = json.loads((index_path / "metadata.json").read_text(encoding="utf-8"))
+
+    assert index_path.name == "digital_person__张三__v1_2_3"
+    assert manifest["skill_version"] == "1.2.3"
+    assert manifest["chat_provider"] == "claude"
+    assert manifest["embedding_provider"] == "openai"
+    assert manifest["collection_name"] == metadata["collection_name"]
+    assert metadata["index_dir"] == f"knowledge/vector_index/{index_path.name}"
 
 
 def test_claude_export_is_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

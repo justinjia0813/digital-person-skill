@@ -14,11 +14,13 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = ""
     openai_model: str = "gpt-4o"
+    openai_embedding_model: str = ""
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
 
     # 向量索引配置
+    embedding_provider: str = ""
     embedding_model: str = "embedding-3"
     chunk_size: int = 500
     chunk_overlap: int = 50

@@ -7,6 +7,7 @@
 - `python -m src.pipeline` 的 CLI 主路径
 - `--provider openai|claude` 的真实 provider 调用
 - provider 凭证缺失时的前置校验
+- `--provider claude` 时的 embedding 默认推导语义
 - `--skip-vector` 下的可降级执行策略
 - `--export claude` 的导出产物检查
 
@@ -15,6 +16,7 @@
 - 真实样本文件：`tests/fixtures/real_provider_articles.json`
 - 输入模式：`--input ... --source wechat_mp`
 - 降级策略：默认带 `--skip-vector`，只验证主生成链路，不把 embedding 配置耦合进首条真实链路测试
+- 若关闭 `--skip-vector`，当前默认 embedding provider 为 `openai`；即使 chat provider 为 `claude`，也需要准备 OpenAI 兼容 embedding 凭证
 
 ## 默认行为
 
@@ -44,6 +46,7 @@ pytest tests/test_pipeline_integration_real_provider.py -k claude -m integration
 - 退出码为 `0`
 - 生成 `output` 目录下的 `digital-person-<name>/`
 - 至少包含 `SKILL.md`、`CLAUDE.md`、`profile/soul.md`、`knowledge/opinions.json`
+- 如果启用向量索引，还应看到 `knowledge/vector_index/manifest.json` 与按 `人物名 + version` 命名的索引目录
 
 ## 建议执行顺序
 

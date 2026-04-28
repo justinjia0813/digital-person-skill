@@ -110,6 +110,9 @@ class SkillConfig(BaseModel):
     data_quality_score: float = 0.0
 
     # RAG 配置
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o"
+    embedding_provider: str = "openai"
     embedding_model: str = "embedding-3"
     similarity_threshold: float = 0.75
     max_chunks: int = 5
@@ -201,6 +204,26 @@ class VersionInfo(BaseModel):
     opinion_count: int = 0
     sources: list[dict] = Field(default_factory=list)
     changes: list[str] = Field(default_factory=list)
+
+
+class VectorIndexManifest(BaseModel):
+    """向量索引构建清单。"""
+
+    person_name: str
+    skill_name: str
+    skill_version: str
+    chat_provider: str
+    chat_model: str
+    embedding_provider: str
+    embedding_model: str
+    collection_name: str
+    index_dir: str
+    generated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    total_documents: int = 0
+    article_chunks: int = 0
+    opinions: int = 0
+    chunk_size: int = 500
+    chunk_overlap: int = 50
 
 
 # ── Phase 3: 隐私分级 ──

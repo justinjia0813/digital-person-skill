@@ -124,6 +124,7 @@ python -m src.pipeline \
 | `--source` | `wechat_mp` / `weibo` / `twitter` / `auto` |
 | `--format` | `auto` / `json` / `csv` / `tweet_js` |
 | `--provider` | `openai` / `claude`；不传时读取 `.env` 中的 `LLM_PROVIDER` |
+| `--embedding-provider` | `openai`；仅在需要向量索引时使用，不传则按运行时规则推导 |
 | `--output` | 输出目录，默认 `./output` |
 | `--skip-vector` | 跳过向量索引构建 |
 | `--export` | `claude` / `chatgpt` |
@@ -134,7 +135,10 @@ python -m src.pipeline \
 
 - `LLM_PROVIDER=openai` 时读取 `OPENAI_API_KEY`
 - `LLM_PROVIDER=claude` 时读取 `ANTHROPIC_API_KEY`
+- 未显式传 `--embedding-provider` 且未启用 `--skip-vector` 时，当前默认使用 `openai` 作为 embedding provider
+- 因此 `--provider claude` 且需要向量索引时，仍需提供 OpenAI 兼容 embedding 凭证
 - 也可以在命令行显式传 `--provider openai` 或 `--provider claude`
+- 如需显式指定，可传 `--embedding-provider openai`
 
 常用环境变量见 [references/setup.md](references/setup.md) 和 [.env.example](.env.example)。
 
@@ -169,7 +173,7 @@ export ANTHROPIC_API_KEY=your_key
 pytest tests/test_pipeline_integration_real_provider.py -k claude -m integration -vv
 ```
 
-默认建议带 `--skip-vector`，先验证主生成链路，再单独检查向量索引依赖。
+默认建议带 `--skip-vector`，先验证主生成链路，再单独检查向量索引依赖；启用向量索引时，还应确认 embedding provider 的默认推导和凭证配置。
 
 ## Web 与 CLI 的边界
 
@@ -198,6 +202,11 @@ output/digital-person-<name>/
 ├── CHANGELOG.md
 ├── profile/
 ├── knowledge/
+│   └── vector_index/
+│       ├── manifest.json
+│       └── digital_person__<name>__v<version>/
+│           ├── chroma/
+│           └── metadata.json
 ├── memory/
 └── versions/
 ```
@@ -205,6 +214,9 @@ output/digital-person-<name>/
 补充说明：
 
 - `SKILL.md`：生成后的 persona skill 主指令
+- `config.yaml` / `build_manifest.json`：记录本次生成使用的 chat provider、embedding provider、skill version
+- `knowledge/vector_index/manifest.json`：记录当前激活向量索引的 collection、provider、版本和分块配置
+- `knowledge/vector_index/digital_person__<name>__v<version>/`：当前版本的本地向量索引目录；目录名和 collection 名都按人物名 + skill version 隔离
 - `CLAUDE.md`：仅在 `--export claude` 时出现，用于 Claude Code 自定义指令
 - `chatgpt_instructions.md`：仅在 `--export chatgpt` 时出现
 

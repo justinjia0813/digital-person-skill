@@ -20,6 +20,7 @@ from src.models import (
     DecisionModel,
     KnowledgeGraphData,
 )
+from src.runtime import RuntimeSettings
 from src.generators.soul_generator import SoulGenerator
 
 
@@ -132,6 +133,7 @@ class SkillGenerator:
         kg_triplets: list[dict] | None = None,
         evolutions: list[OpinionEvolution] | None = None,
         cognitive_data: dict | None = None,
+        runtime_settings: RuntimeSettings | None = None,
     ) -> Path:
         """生成完整的 Skill 包"""
         base = Path(output_dir) / f"digital-person-{name}"
@@ -256,6 +258,16 @@ class SkillGenerator:
             person_name=name,
             version=version,
             data_sources=self._summarize_sources(items),
+            llm_provider=runtime_settings.chat_provider if runtime_settings else "openai",
+            llm_model=runtime_settings.chat_model if runtime_settings else "gpt-4o",
+            embedding_provider=(
+                runtime_settings.embedding_provider if runtime_settings and runtime_settings.embedding_provider
+                else ""
+            ),
+            embedding_model=(
+                runtime_settings.embedding_model if runtime_settings and runtime_settings.embedding_model
+                else ""
+            ),
         )
         (temp_base / "config.yaml").write_text(
             yaml.dump(config.model_dump(), allow_unicode=True, default_flow_style=False),
@@ -280,6 +292,7 @@ class SkillGenerator:
             version=version,
             article_count=len(items),
             opinion_count=len(opinions),
+            runtime_settings=runtime_settings,
         )
 
         backup_base = None
@@ -313,6 +326,7 @@ class SkillGenerator:
         version: str,
         article_count: int,
         opinion_count: int,
+        runtime_settings: RuntimeSettings | None = None,
     ) -> None:
         manifest = {
             "version": version,
@@ -323,6 +337,14 @@ class SkillGenerator:
             },
             "files": generated_files,
         }
+        if runtime_settings:
+            manifest["runtime"] = {
+                "chat_provider": runtime_settings.chat_provider,
+                "chat_model": runtime_settings.chat_model,
+                "embedding_provider": runtime_settings.embedding_provider,
+                "embedding_model": runtime_settings.embedding_model,
+                "skip_vector": runtime_settings.skip_vector,
+            }
         (skill_dir / "build_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
