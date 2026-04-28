@@ -69,6 +69,10 @@ python -m src.pipeline --help
 - 不传 `--provider` 时，读取 `.env` 中的 `LLM_PROVIDER`
 - `LLM_PROVIDER=openai` 需要 `OPENAI_API_KEY`
 - `LLM_PROVIDER=claude` 需要 `ANTHROPIC_API_KEY`
+- 未传 `--skip-vector` 时，会额外解析 embedding provider；当前默认且唯一支持的 embedding provider 是 `openai`
+- 因此 `--provider claude` 且需要向量索引时，仍需要 `OPENAI_API_KEY`
+- 如需显式指定，可传 `--embedding-provider openai`
+- embedding model 优先读取 `OPENAI_EMBEDDING_MODEL`，未设置时回退到 `EMBEDDING_MODEL`
 
 ## 首次运行建议
 

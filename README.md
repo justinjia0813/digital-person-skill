@@ -131,14 +131,27 @@ python -m src.pipeline \
 
 ## Provider 配置
 
-默认逻辑：
+运行时会分别解析 chat provider 和 embedding provider：
 
-- `LLM_PROVIDER=openai` 时读取 `OPENAI_API_KEY`
-- `LLM_PROVIDER=claude` 时读取 `ANTHROPIC_API_KEY`
-- 未显式传 `--embedding-provider` 且未启用 `--skip-vector` 时，当前默认使用 `openai` 作为 embedding provider
-- 因此 `--provider claude` 且需要向量索引时，仍需提供 OpenAI 兼容 embedding 凭证
-- 也可以在命令行显式传 `--provider openai` 或 `--provider claude`
-- 如需显式指定，可传 `--embedding-provider openai`
+- `--provider` / `LLM_PROVIDER` 决定聊天模型提供方，目前只支持 `openai` 和 `claude`
+- `--embedding-provider` 只在构建向量索引时生效；当前仅支持 `openai`
+- 命令行传参优先级高于 `.env`
+
+常见组合与行为：
+
+- `--provider openai --skip-vector`：只校验 OpenAI 聊天模型配置，需要 `OPENAI_API_KEY` 和 `OPENAI_MODEL`
+- `--provider openai` 且不传 `--skip-vector`：chat 与 embedding 都走 OpenAI；还需要可用的 embedding model
+- `--provider claude --skip-vector`：只校验 Claude 聊天模型配置，需要 `ANTHROPIC_API_KEY` 和 `ANTHROPIC_MODEL`
+- `--provider claude` 且不传 `--embedding-provider`：chat 走 Claude，但 embedding 会默认推导为 `openai`
+- `--provider claude --embedding-provider openai`：与上一条等价，只是把默认推导显式写出来
+- `--embedding-provider claude`：当前会直接报错，因为 embedding provider 目前仅支持 `openai`
+
+`skip_vector=false`（也就是未传 `--skip-vector`）时的前置校验：
+
+- 一定会校验 embedding provider 配置，而不是只校验 chat provider
+- 当前默认 embedding provider 是 `openai`
+- 因此 `--provider claude` 且需要向量索引时，仍必须提供 OpenAI 兼容 embedding 凭证
+- embedding model 优先读 `OPENAI_EMBEDDING_MODEL`，未设置时回退到 `EMBEDDING_MODEL`
 
 常用环境变量见 [references/setup.md](references/setup.md) 和 [.env.example](.env.example)。
 
@@ -215,8 +228,10 @@ output/digital-person-<name>/
 
 - `SKILL.md`：生成后的 persona skill 主指令
 - `config.yaml` / `build_manifest.json`：记录本次生成使用的 chat provider、embedding provider、skill version
-- `knowledge/vector_index/manifest.json`：记录当前激活向量索引的 collection、provider、版本和分块配置
-- `knowledge/vector_index/digital_person__<name>__v<version>/`：当前版本的本地向量索引目录；目录名和 collection 名都按人物名 + skill version 隔离
+- `knowledge/vector_index/manifest.json`：当前激活索引的清单，包含 `person_name`、`skill_name`、`skill_version`、`chat_provider`、`chat_model`、`embedding_provider`、`embedding_model`、`collection_name`、`index_dir` 以及分块统计
+- `knowledge/vector_index/digital_person__<name>__v<version>/`：当前版本的本地向量索引目录；目录名与 `collection_name` 都按“人物名 + skill version”生成，例如 `digital_person__张三__v1_2_3`
+- 每次生成只会把最新一次构建结果写到根目录的 `knowledge/vector_index/manifest.json`，但实际索引文件落在对应版本目录下，所以 `v1.2.3` 与 `v1.2.4` 会天然隔离，不会共用同一个本地 Chroma 路径
+- 读取或排查向量索引时，应先看 `manifest.json` 指向的 `index_dir`，再进入该版本目录查看 `metadata.json` 与 `chroma/`
 - `CLAUDE.md`：仅在 `--export claude` 时出现，用于 Claude Code 自定义指令
 - `chatgpt_instructions.md`：仅在 `--export chatgpt` 时出现
 
