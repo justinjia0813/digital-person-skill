@@ -345,6 +345,10 @@ class SkillGenerator:
                 "embedding_model": runtime_settings.embedding_model,
                 "skip_vector": runtime_settings.skip_vector,
             }
+            manifest["vector_index"] = {
+                "mode": "skipped" if runtime_settings.skip_vector else "enabled",
+                "skip_vector": runtime_settings.skip_vector,
+            }
         (skill_dir / "build_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",

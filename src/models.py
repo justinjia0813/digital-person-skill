@@ -212,13 +212,16 @@ class VectorIndexManifest(BaseModel):
     person_name: str
     skill_name: str
     skill_version: str
+    index_schema: str
+    index_version: str
     chat_provider: str
     chat_model: str
     embedding_provider: str
     embedding_model: str
     collection_name: str
     index_dir: str
-    generated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    source_fingerprint: str
+    built_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     total_documents: int = 0
     article_chunks: int = 0
     opinions: int = 0

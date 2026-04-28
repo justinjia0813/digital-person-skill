@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from src.embeddings import BaseEmbedder
@@ -13,6 +15,9 @@ from src.runtime import RuntimeSettings
 
 class VectorIndexer:
     """使用 ChromaDB + OpenAI 兼容 embedding API 构建向量索引"""
+
+    INDEX_SCHEMA = "digital_person_vector_index"
+    INDEX_VERSION = "1"
 
     def __init__(
         self,
@@ -42,6 +47,22 @@ class VectorIndexer:
         vector_db_path = vector_root / collection_name
         chroma_path = vector_db_path / "chroma"
         chroma_path.mkdir(parents=True, exist_ok=True)
+        built_at = datetime.now().isoformat()
+        source_fingerprint = self._source_fingerprint(items, opinions)
+        collection_metadata = {
+            "hnsw:space": "cosine",
+            "person_name": person_name,
+            "skill_name": skill_name,
+            "skill_version": skill_version,
+            "chat_provider": runtime_settings.chat_provider,
+            "chat_model": runtime_settings.chat_model,
+            "embedding_provider": self.embedder.provider,
+            "embedding_model": self.embedder.model,
+            "index_schema": self.INDEX_SCHEMA,
+            "index_version": self.INDEX_VERSION,
+            "built_at": built_at,
+            "source_fingerprint": source_fingerprint,
+        }
 
         # 初始化 ChromaDB（纯本地模式）
         client = chromadb.PersistentClient(path=str(chroma_path))
@@ -49,9 +70,9 @@ class VectorIndexer:
         # 使用 OpenAI 兼容的 embedding 函数
         embedding_fn = self.embedder.create_embedding_function()
         collection = client.get_or_create_collection(
-            name="digital_person",
+            name=collection_name,
             embedding_function=embedding_fn,
-            metadata={"hnsw:space": "cosine"},
+            metadata=collection_metadata,
         )
 
         # ── 1. 文章分块索引 ──
@@ -113,12 +134,16 @@ class VectorIndexer:
             "person_name": person_name,
             "skill_name": skill_name,
             "skill_version": skill_version,
+            "index_schema": self.INDEX_SCHEMA,
+            "index_version": self.INDEX_VERSION,
             "chat_provider": runtime_settings.chat_provider,
             "chat_model": runtime_settings.chat_model,
             "embedding_provider": self.embedder.provider,
             "embedding_model": self.embedder.model,
             "collection_name": collection_name,
             "index_dir": str(vector_db_path.relative_to(Path(output_dir))),
+            "source_fingerprint": source_fingerprint,
+            "built_at": built_at,
             "total_documents": len(doc_ids),
             "article_chunks": sum(1 for m in doc_metadatas if m["type"] == "article_chunk"),
             "opinions": sum(1 for m in doc_metadatas if m["type"] == "opinion"),
@@ -172,6 +197,34 @@ class VectorIndexer:
         slug = re.sub(r"[^\w-]+", "_", person_name, flags=re.UNICODE).strip("_") or "person"
         version_slug = skill_version.replace(".", "_")
         return f"digital_person__{slug}__v{version_slug}"
+
+    @staticmethod
+    def _source_fingerprint(items: list[ContentItem], opinions: list[Opinion]) -> str:
+        payload = {
+            "items": [
+                {
+                    "id": item.id,
+                    "source": item.source,
+                    "title": item.title,
+                    "url": item.url,
+                    "content": item.content,
+                }
+                for item in items
+            ],
+            "opinions": [
+                {
+                    "opinion_id": op.opinion_id,
+                    "content_id": op.content_id,
+                    "claim": op.claim,
+                    "domain": op.domain,
+                    "topic": op.topic,
+                }
+                for op in opinions
+            ],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
 
     @staticmethod
     def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:

@@ -353,8 +353,14 @@ def test_pipeline_uses_explicit_embedding_provider_when_vector_enabled(
                     {
                         "person_name": person_name,
                         "skill_version": skill_version,
+                        "index_schema": "digital_person_vector_index",
+                        "index_version": "1",
                         "chat_provider": runtime_settings.chat_provider,
+                        "chat_model": runtime_settings.chat_model,
                         "embedding_provider": runtime_settings.embedding_provider,
+                        "embedding_model": runtime_settings.embedding_model,
+                        "source_fingerprint": "fake",
+                        "built_at": "2026-04-28T00:00:00",
                     }
                 ),
                 encoding="utf-8",
@@ -382,12 +388,19 @@ def test_pipeline_uses_explicit_embedding_provider_when_vector_enabled(
     assert config["embedding_provider"] == "openai"
     assert config["embedding_model"] == "text-embedding-3-small"
 
+    build_manifest = json.loads((skill_path / "build_manifest.json").read_text(encoding="utf-8"))
+    assert build_manifest["runtime"]["chat_provider"] == "claude"
+    assert build_manifest["runtime"]["embedding_provider"] == "openai"
+    assert build_manifest["vector_index"]["mode"] == "enabled"
+
 
 def test_vector_indexer_writes_versioned_manifest_and_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from src.embeddings import BaseEmbedder
     from src.generators.vector_indexer import VectorIndexer
+
+    created_clients = []
 
     class FakeCollection:
         def __init__(self):
@@ -400,6 +413,7 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
         def __init__(self, path: str):
             self.path = path
             self.collection = FakeCollection()
+            created_clients.append(self)
 
         def get_or_create_collection(self, name, embedding_function, metadata):
             self.name = name
@@ -445,11 +459,97 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
     metadata = json.loads((index_path / "metadata.json").read_text(encoding="utf-8"))
 
     assert index_path.name == "digital_person__张三__v1_2_3"
+    assert manifest["index_schema"] == "digital_person_vector_index"
+    assert manifest["index_version"] == "1"
     assert manifest["skill_version"] == "1.2.3"
     assert manifest["chat_provider"] == "claude"
+    assert manifest["chat_model"] == "claude-sonnet-4-20250514"
     assert manifest["embedding_provider"] == "openai"
+    assert manifest["embedding_model"] == "text-embedding-3-small"
+    assert manifest["source_fingerprint"] == metadata["source_fingerprint"]
+    assert manifest["built_at"] == metadata["built_at"]
     assert manifest["collection_name"] == metadata["collection_name"]
     assert metadata["index_dir"] == f"knowledge/vector_index/{index_path.name}"
+    assert created_clients[0].name == "digital_person__张三__v1_2_3"
+    assert created_clients[0].metadata["index_schema"] == "digital_person_vector_index"
+
+
+def test_vector_indexer_isolates_versions_and_provider_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from src.embeddings import BaseEmbedder
+    from src.generators.vector_indexer import VectorIndexer
+
+    created_clients = []
+
+    class FakeCollection:
+        def __init__(self):
+            self.upserts = []
+
+        def upsert(self, ids, documents, metadatas):
+            self.upserts.append((ids, documents, metadatas))
+
+    class FakeClient:
+        def __init__(self, path: str):
+            self.path = path
+            self.collection = FakeCollection()
+            self.metadata = None
+            self.name = None
+            created_clients.append(self)
+
+        def get_or_create_collection(self, name, embedding_function, metadata):
+            self.name = name
+            self.metadata = metadata
+            return self.collection
+
+        def get_collection(self, name, embedding_function):
+            return self.collection
+
+    fake_chromadb = SimpleNamespace(PersistentClient=FakeClient)
+    monkeypatch.setitem(sys.modules, "chromadb", fake_chromadb)
+
+    class FakeEmbedder(BaseEmbedder):
+        provider = "openai"
+        model = "text-embedding-3-small"
+
+        def create_embedding_function(self):
+            return object()
+
+    indexer = VectorIndexer(embedder=FakeEmbedder(), chunk_size=40, chunk_overlap=10)
+    runtime = RuntimeSettings(
+        chat_provider="claude",
+        chat_model="claude-sonnet-4-20250514",
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        skip_vector=False,
+    )
+
+    first_index_path = indexer.build_index(
+        person_name="张三",
+        skill_version="1.2.3",
+        runtime_settings=runtime,
+        items=[_make_item()],
+        opinions=[_make_opinion()],
+        output_dir=str(tmp_path),
+    )
+    second_index_path = indexer.build_index(
+        person_name="张三",
+        skill_version="1.2.4",
+        runtime_settings=runtime,
+        items=[_make_item()],
+        opinions=[_make_opinion()],
+        output_dir=str(tmp_path),
+    )
+
+    assert first_index_path != second_index_path
+    assert first_index_path.name == "digital_person__张三__v1_2_3"
+    assert second_index_path.name == "digital_person__张三__v1_2_4"
+    assert created_clients[0].name == "digital_person__张三__v1_2_3"
+    assert created_clients[1].name == "digital_person__张三__v1_2_4"
+    assert created_clients[0].metadata["chat_provider"] == "claude"
+    assert created_clients[0].metadata["embedding_provider"] == "openai"
+    assert created_clients[0].metadata["skill_version"] == "1.2.3"
+    assert created_clients[1].metadata["skill_version"] == "1.2.4"
 
 
 def test_claude_export_is_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
