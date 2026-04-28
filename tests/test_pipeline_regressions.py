@@ -436,27 +436,10 @@ def test_pipeline_writes_explicit_skip_vector_manifest(
     assert vector_manifest["source_fingerprint"]
     assert vector_manifest["collection_name"] is None
     assert vector_manifest["index_dir"] is None
-    assert set(vector_manifest) == {
-        "enabled",
-        "skip_reason",
-        "person_name",
-        "skill_name",
-        "skill_version",
-        "index_schema_version",
-        "chat_provider",
-        "chat_model",
-        "embedding_provider",
-        "embedding_model",
-        "collection_name",
-        "index_dir",
-        "source_fingerprint",
-        "built_at",
-        "total_documents",
-        "article_chunks",
-        "opinions",
-        "chunk_size",
-        "chunk_overlap",
-    }
+    assert set(vector_manifest) == set(VectorIndexManifest.FIELD_NAMES)
+    assert vector_manifest["total_documents"] == 0
+    assert vector_manifest["article_chunks"] == 0
+    assert vector_manifest["opinions"] == 0
 
 
 def test_vector_indexer_writes_versioned_manifest_and_metadata(
@@ -542,30 +525,11 @@ def test_vector_indexer_writes_versioned_manifest_and_metadata(
     assert metadata["index_schema_version"] == manifest["index_schema_version"]
     assert created_clients[0].name == "digital_person__张三__v1_2_3"
     assert collection_metadata["index_schema_version"] == "digital_person_vector_index/v1"
-    assert set(manifest) == {
-        "enabled",
-        "skip_reason",
-        "person_name",
-        "skill_name",
-        "skill_version",
-        "index_schema_version",
-        "chat_provider",
-        "chat_model",
-        "embedding_provider",
-        "embedding_model",
-        "collection_name",
-        "index_dir",
-        "source_fingerprint",
-        "built_at",
-        "total_documents",
-        "article_chunks",
-        "opinions",
-        "chunk_size",
-        "chunk_overlap",
-    }
+    assert set(manifest) == set(VectorIndexManifest.FIELD_NAMES)
     assert set(metadata) == set(manifest)
-    assert set(collection_metadata) == {"hnsw:space", *VectorIndexManifest.CORE_FIELD_NAMES}
-    for field in VectorIndexManifest.CORE_FIELD_NAMES:
+    assert metadata == manifest
+    assert set(collection_metadata) == {"hnsw:space", *VectorIndexManifest.COLLECTION_FIELD_NAMES}
+    for field in VectorIndexManifest.COLLECTION_FIELD_NAMES:
         assert manifest[field] == metadata[field] == collection_metadata[field]
     for field in (
         "total_documents",

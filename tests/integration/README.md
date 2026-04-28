@@ -47,8 +47,8 @@ pytest tests/test_pipeline_integration_real_provider.py -k claude -m integration
 - 生成 `output` 目录下的 `digital-person-<name>/`
 - 至少包含 `SKILL.md`、`CLAUDE.md`、`profile/soul.md`、`knowledge/opinions.json`
 - 无论是否启用向量索引，都应看到 `knowledge/vector_index/manifest.json`
-- 启用向量索引时，manifest 应包含 `enabled=true`，且会生成按 `人物名 + version` 命名的索引目录
-- 使用 `--skip-vector` 时，manifest 应显式包含 `enabled=false` 与 `skip_reason=explicit_skip_vector`
+- 启用向量索引时，`manifest.json` 与版本目录下的 `metadata.json` 应共享 `VectorIndexManifest.FIELD_NAMES` 全量字段，collection metadata 应共享 `VectorIndexManifest.COLLECTION_FIELD_NAMES` 核心字段，且会生成按 `人物名 + version` 命名的索引目录
+- 使用 `--skip-vector` 时，`knowledge/vector_index/manifest.json` 仍应稳定落盘，并显式包含 `enabled=false` 与 `skip_reason=explicit_skip_vector`
 
 ## 建议执行顺序
 
